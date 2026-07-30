@@ -159,7 +159,7 @@ function buildEmailHtml(newsList: NewsItem[]): string {
       ? `
         <div style="text-align: center; padding: 48px 20px; color: #999;">
           <div style="font-size: 48px; margin-bottom: 12px;">📭</div>
-          <p style="margin: 0; font-size: 14px;">过去24小时内暂无相关新闻</p>
+          <p style="margin: 0; font-size: 14px;">过去48小时内暂无相关新闻</p>
         </div>
       `
       : '';
@@ -244,7 +244,7 @@ export async function sendMail(newsList: NewsItem[]): Promise<void> {
   const info = await transporter.sendMail({
     from: `"汽车膜早报" <${mail.from}>`,
     to: mail.to.join(', '),
-    subject: `【汽车膜早报】${today} · 过去24小时 Top ${count} 新闻`,
+    subject: `【汽车膜早报】${today} · 过去48小时 Top ${count} 新闻`,
     html,
   });
 

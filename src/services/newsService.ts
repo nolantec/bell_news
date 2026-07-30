@@ -222,7 +222,7 @@ async function fetchBaiduNews(keyword: string): Promise<NewsItem[]> {
 }
 
 /**
- * 获取过去24小时内的汽车膜行业 Top N 新闻
+ * 获取汽车膜行业 Top N 新闻（优先48小时内，兜底不限时间）
  * 从 Bing + 百度双源并行抓取，去重后按时间排序
  */
 export async function getTopNews(
@@ -232,7 +232,8 @@ export async function getTopNews(
 ): Promise<NewsItem[]> {
   const allNews: NewsItem[] = [];
   const now = new Date();
-  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const timeWindowHours = 48;
+  const timeWindowAgo = new Date(now.getTime() - timeWindowHours * 60 * 60 * 1000);
 
   // 并行抓取 Bing + 百度，每个关键词各发两个源
   const fetchTasks = keywords.flatMap((keyword) => [
@@ -260,11 +261,17 @@ export async function getTopNews(
     return true;
   });
 
-  // 过滤过去24小时内的新闻
-  const recentNews = uniqueNews.filter((item) => item.pubDate >= twentyFourHoursAgo);
-
   // 按发布时间倒序排列
-  recentNews.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
+  uniqueNews.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
+
+  // 优先取时间窗口内的新闻
+  let recentNews = uniqueNews.filter((item) => item.pubDate >= timeWindowAgo);
+
+  // 兜底：如果时间窗口内没新闻，取最新 N 条（不限时间）
+  if (recentNews.length === 0 && uniqueNews.length > 0) {
+    console.log(`过去${timeWindowHours}小时内无新闻，使用最新 ${Math.min(maxCount, uniqueNews.length)} 条（不限时间）`);
+    recentNews = uniqueNews;
+  }
 
   // 取前 N 条
   const topNews = recentNews.slice(0, maxCount);
