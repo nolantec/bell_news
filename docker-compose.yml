@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  morning-paper:
+    build: .
+    container_name: morning-paper
+    restart: unless-stopped
+    environment:
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - MAIL_TO=${MAIL_TO}
+      - SCHEDULE=${SCHEDULE}
+      - NEWS_KEYWORDS=${NEWS_KEYWORDS}
+      - NEWS_LANG=${NEWS_LANG}
+      - NEWS_MAX_COUNT=${NEWS_MAX_COUNT}
+    env_file:
+      - .env
