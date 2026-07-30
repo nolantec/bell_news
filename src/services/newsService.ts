@@ -11,7 +11,7 @@ export interface NewsItem {
 }
 
 /**
- * 清理 HTML 标签，提取纯文本（用于描述摘要）
+ * 清理 HTML 标签和实体，提取纯文本
  */
 function stripHtml(html: string): string {
   return html
@@ -27,10 +27,29 @@ function stripHtml(html: string): string {
 }
 
 /**
- * 通用 RSS XML 解析器
- * 兼容 Google News、Bing、百度、搜狗等多种 RSS 格式
+ * HTML 实体解码
  */
-function parseRssItems(xml: string): NewsItem[] {
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .trim();
+}
+
+/**
+ * 解析 Google News RSS XML
+ * Google RSS 结构:
+ *   <title>新闻标题 - 来源名</title>
+ *   <link>https://news.google.com/rss/articles/...</link>
+ *   <pubDate>Thu, 30 Jul 2026 03:22:00 GMT</pubDate>
+ *   <description>&lt;a href="..."&gt;标题&lt;/a&gt;...&lt;font&gt;来源&lt;/font&gt;</description>
+ *   <source url="...">来源名</source>
+ */
+function parseGoogleRss(xml: string): NewsItem[] {
   const items: NewsItem[] = [];
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
   let match;
@@ -38,50 +57,40 @@ function parseRssItems(xml: string): NewsItem[] {
   while ((match = itemRegex.exec(xml)) !== null) {
     const content = match[1];
 
-    // 标题（兼容 CDATA）
+    // 标题（CDATA 或纯文本，格式: "新闻标题 - 来源名"）
     const titleMatch =
       content.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) ||
       content.match(/<title>(.*?)<\/title>/);
-    const title = titleMatch ? stripHtml(titleMatch[1].trim()) : '';
+    const rawTitle = titleMatch ? decodeHtmlEntities(titleMatch[1].trim()) : '';
 
-    // 链接（去掉 Bing 的跳转前缀）
+    // Google 的链接是跳转链接，在邮件中可正常跳转
     const linkMatch = content.match(/<link>(.*?)<\/link>/);
-    let link = linkMatch ? linkMatch[1].trim() : '';
-    if (link.startsWith('https://www.bing.com/news/apiclick.aspx?')) {
-      const urlParam = new URL(link).searchParams.get('url');
-      if (urlParam) link = decodeURIComponent(urlParam);
-    }
+    const link = linkMatch ? linkMatch[1].trim() : '';
 
     // 发布时间
     const pubDateMatch = content.match(/<pubDate>(.*?)<\/pubDate>/);
     const pubDate = pubDateMatch ? new Date(pubDateMatch[1]) : new Date();
 
-    // 来源
-    const sourceMatch =
-      content.match(/<source url=".*?">(.*?)<\/source>/) ||
-      content.match(/<news:source>(.*?)<\/news:source>/);
-    const source = sourceMatch ? sourceMatch[1].trim() : undefined;
+    // 来源（从 <source> 标签获取）
+    const sourceMatch = content.match(/<source[^>]*>(.*?)<\/source>/);
+    const source = sourceMatch ? decodeHtmlEntities(sourceMatch[1].trim()) : undefined;
 
-    // 描述（清理 HTML 标签）
+    // 标题中通常包含来源后缀 " - 来源名"，去掉它
+    let title = rawTitle;
+    if (source && title.endsWith(` - ${source}`)) {
+      title = title.slice(0, -(source.length + 3)).trim();
+    }
+
+    // 描述（先解码 HTML 实体，再清除标签，提取纯文本）
     const descMatch =
       content.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/) ||
       content.match(/<description>(.*?)<\/description>/);
-    const description = descMatch ? stripHtml(descMatch[1]).slice(0, 200) : undefined;
-
-    // 图片（兼容多种 RSS 扩展）
-    let imageUrl: string | undefined;
-    const enclosureMatch = content.match(/<enclosure[^>]+url="([^"]+)"/);
-    const mediaMatch = content.match(/<media:thumbnail[^>]+url="([^"]+)"/);
-    const newsImageMatch = content.match(/<News:Image>(.*?)<\/News:Image>/);
-    // 也尝试从 description 的 img 标签中提取
-    const descImgMatch = descMatch?.[1]?.match(/<img[^>]+src="([^"]+)"/);
-    if (enclosureMatch) imageUrl = enclosureMatch[1];
-    else if (mediaMatch) imageUrl = mediaMatch[1];
-    else if (newsImageMatch) imageUrl = newsImageMatch[1].trim();
-    else if (descImgMatch) imageUrl = descImgMatch[1];
+    const description = descMatch
+      ? stripHtml(decodeHtmlEntities(descMatch[1])).slice(0, 200)
+      : undefined;
 
     if (title && link) {
-      items.push({ title, link, pubDate, source, description, imageUrl });
+      items.push({ title, link, pubDate, source, description });
     }
   }
 
@@ -89,7 +98,17 @@ function parseRssItems(xml: string): NewsItem[] {
 }
 
 /**
- * 从网页中提取 Open Graph 图片（用于前三条新闻补全图片）
+ * 将 Google News 跳转链接替换为百度搜索链接
+ * Google RSS 链接 (news.google.com/rss/articles/...) 国内无法访问，
+ * 替换为 https://www.baidu.com/s?wd=文章标题，用户点击后可直接搜索到原文
+ */
+function toBaiduSearchUrl(title: string): string {
+  const query = encodeURIComponent(title);
+  return `https://www.baidu.com/s?wd=${query}`;
+}
+
+/**
+ * 从文章页面提取 OG 图片（为前三条新闻补全图片）
  */
 async function fetchOgImage(url: string): Promise<string | undefined> {
   try {
@@ -102,6 +121,7 @@ async function fetchOgImage(url: string): Promise<string | undefined> {
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       },
       signal: controller.signal,
+      redirect: 'follow',
     });
     clearTimeout(timeout);
 
@@ -109,30 +129,33 @@ async function fetchOgImage(url: string): Promise<string | undefined> {
 
     const html = await response.text();
 
-    // 匹配 og:image
-    const ogMatch = html.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i);
+    // og:image
+    const ogMatch = html.match(
+      /<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i
+    );
     if (ogMatch) return ogMatch[1];
 
-    // 匹配 twitter:image
-    const twMatch = html.match(/<meta[^>]+name="twitter:image"[^>]+content="([^"]+)"/i);
+    // twitter:image
+    const twMatch = html.match(
+      /<meta[^>]+name="twitter:image"[^>]+content="([^"]+)"/i
+    );
     if (twMatch) return twMatch[1];
 
-    // 匹配 article:image（百度新闻常用）
-    const articleMatch = html.match(
+    // itemProp image
+    const itemMatch = html.match(
       /<meta[^>]+itemprop="image"[^>]+content="([^"]+)"/i
     );
-    if (articleMatch) return articleMatch[1];
+    if (itemMatch) return itemMatch[1];
 
-    // 匹配第一个较大的 img 标签
-    const imgMatch = html.match(/<img[^>]+src="([^"]+)"[^>]*>/i);
+    // 第一个有效 img
+    const imgMatch = html.match(/<img[^>]+src="(https?:\/\/[^"]+)"[^>]*>/i);
     if (imgMatch) {
       const src = imgMatch[1];
       if (
         !src.includes('logo') &&
         !src.includes('icon') &&
         !src.includes('avatar') &&
-        !src.includes('qr_code') &&
-        src.startsWith('http')
+        !src.includes('qr_code')
       ) {
         return src;
       }
@@ -145,85 +168,43 @@ async function fetchOgImage(url: string): Promise<string | undefined> {
 }
 
 /**
- * 抓取 Bing 新闻 RSS（国内可访问）
+ * 从 Google News RSS 抓取新闻
  */
-async function fetchBingNews(keyword: string): Promise<NewsItem[]> {
+async function fetchGoogleNews(keyword: string): Promise<NewsItem[]> {
   const query = encodeURIComponent(keyword);
-  const url = `https://cn.bing.com/news/search?q=${query}&format=rss`;
+  // hl=zh-CN 中文, gl=CN 中国区, ceid=CN:zh-Hans 简体中文
+  const url = `https://news.google.com/rss/search?q=${query}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)',
-        'Accept-Language': 'zh-CN,zh;q=0.9',
       },
       signal: controller.signal,
     });
 
     if (!response.ok) {
-      throw new Error(`Bing 新闻抓取失败: ${response.status}`);
+      throw new Error(`Google News 抓取失败: ${response.status}`);
     }
 
     const xml = await response.text();
-    return parseRssItems(xml);
+
+    if (!xml.includes('<item>')) {
+      throw new Error('Google News 返回数据为空');
+    }
+
+    return parseGoogleRss(xml);
   } finally {
     clearTimeout(timeout);
   }
 }
 
 /**
- * 抓取百度新闻 RSS（国内可访问）
- */
-async function fetchBaiduNews(keyword: string): Promise<NewsItem[]> {
-  const query = encodeURIComponent(keyword);
-  const url = `https://news.baidu.com/ns?word=${query}&tn=newsrss&sr=0&cl=2&rn=20&ct=0`;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)',
-        'Accept-Language': 'zh-CN,zh;q=0.9',
-      },
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`百度新闻抓取失败: ${response.status}`);
-    }
-
-    // 百度 RSS 可能是 GBK 编码，需要兼容处理
-    const buffer = await response.arrayBuffer();
-    const decoder = new TextDecoder('utf-8');
-    let xml = decoder.decode(buffer);
-
-    // 检测是否为有效 RSS（防止 GBK 乱码被当作有效数据）
-    if (!xml.includes('<item>') || (xml.includes('�') && xml.includes('<item>'))) {
-      try {
-        const gbkDecoder = new TextDecoder('gbk');
-        const gbkXml = gbkDecoder.decode(buffer);
-        if (gbkXml.includes('<item>')) {
-          xml = gbkXml;
-        }
-      } catch {
-        // 保持 UTF-8 结果
-      }
-    }
-
-    return parseRssItems(xml);
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-/**
- * 获取汽车膜行业 Top N 新闻（优先48小时内，兜底不限时间）
- * 从 Bing + 百度双源并行抓取，去重后按时间排序
+ * 获取过去48小时内的汽车膜行业 Top N 新闻
+ * 从 Google News RSS 抓取，去重后按时间排序
  */
 export async function getTopNews(
   keywords: readonly string[],
@@ -235,17 +216,13 @@ export async function getTopNews(
   const timeWindowHours = 48;
   const timeWindowAgo = new Date(now.getTime() - timeWindowHours * 60 * 60 * 1000);
 
-  // 并行抓取 Bing + 百度，每个关键词各发两个源
-  const fetchTasks = keywords.flatMap((keyword) => [
-    fetchBingNews(keyword).catch((err) => {
-      console.error(`Bing 关键词 [${keyword}] 抓取失败:`, err.message);
+  // 并行抓取所有关键词
+  const fetchTasks = keywords.map((keyword) =>
+    fetchGoogleNews(keyword).catch((err) => {
+      console.error(`关键词 [${keyword}] 抓取失败:`, err.message);
       return [] as NewsItem[];
-    }),
-    fetchBaiduNews(keyword).catch((err) => {
-      console.error(`百度关键词 [${keyword}] 抓取失败:`, err.message);
-      return [] as NewsItem[];
-    }),
-  ]);
+    })
+  );
 
   const results = await Promise.all(fetchTasks);
 
@@ -267,25 +244,35 @@ export async function getTopNews(
   // 优先取时间窗口内的新闻
   let recentNews = uniqueNews.filter((item) => item.pubDate >= timeWindowAgo);
 
-  // 兜底：如果时间窗口内没新闻，取最新 N 条（不限时间）
+  // 兜底：如果时间窗口内没新闻，取最新 N 条
   if (recentNews.length === 0 && uniqueNews.length > 0) {
-    console.log(`过去${timeWindowHours}小时内无新闻，使用最新 ${Math.min(maxCount, uniqueNews.length)} 条（不限时间）`);
+    console.log(
+      `过去${timeWindowHours}小时内无新闻，使用最新 ${Math.min(maxCount, uniqueNews.length)} 条`
+    );
     recentNews = uniqueNews;
   }
 
   // 取前 N 条
   const topNews = recentNews.slice(0, maxCount);
 
-  // 为前三条补全图片（如果 RSS 里没有图片，则从原文页面抓取 og:image）
+  // 为前三条补全图片（用 Google 链接抓取缓存图，lh3 域名国内可访问）
   const topThree = topNews.slice(0, 3);
   const imageFetchers = topThree.map(async (item) => {
     if (!item.imageUrl) {
       console.log(`  补全图片: ${item.title.slice(0, 30)}...`);
       item.imageUrl = await fetchOgImage(item.link);
+      if (item.imageUrl) {
+        console.log(`    ✓ 获取成功`);
+      }
     }
     return item;
   });
   await Promise.all(imageFetchers);
+
+  // 将链接替换为百度搜索（Google News 链接国内无法打开）
+  for (const item of topNews) {
+    item.link = toBaiduSearchUrl(item.title);
+  }
 
   return topNews;
 }

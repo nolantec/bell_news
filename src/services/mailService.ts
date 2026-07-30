@@ -3,21 +3,11 @@ import { CONFIG } from '../config';
 import type { NewsItem } from './newsService';
 
 /**
- * 内联 SVG 占位图（国内可访问，无需外部依赖）
- * 深色渐变背景 + 新闻图标
+ * 内联占位图 base64（1x1 透明像素，邮件客户端兼容性最好）
+ * 用纯 CSS 背景色替代，不依赖外部资源
  */
-const FALLBACK_IMAGE =
-  'data:image/svg+xml,' +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160">
-      <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" style="stop-color:#e8e8e8"/><stop offset="100%" style="stop-color:#d0d0d0"/>
-      </linearGradient></defs>
-      <rect width="240" height="160" fill="url(#g)"/>
-      <text x="120" y="85" text-anchor="middle" fill="#999" font-size="32" font-family="sans-serif">📰</text>
-      <text x="120" y="115" text-anchor="middle" fill="#aaa" font-size="12" font-family="sans-serif">暂无图片</text>
-    </svg>`
-  );
+const EMPTY_PIXEL =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
 /**
  * 截断文本（中文友好，按字符数）
@@ -28,94 +18,130 @@ function truncateText(text: string, maxLen: number): string {
 }
 
 /**
- * 构建图文卡片（前三条，带缩略图 + 描述摘要）
+ * HTML 转义（防止新闻标题中的特殊字符破坏邮件结构）
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * 构建图文卡片（前三条，table 布局，兼容所有邮件客户端）
  */
 function buildFeaturedCard(item: NewsItem, index: number): string {
-  const imageUrl = item.imageUrl || FALLBACK_IMAGE;
-  const sourceText = item.source ? `${item.source} · ` : '';
+  const imageUrl = item.imageUrl || EMPTY_PIXEL;
+  const hasRealImage = !!item.imageUrl;
+  const sourceText = item.source ? `${escapeHtml(item.source)} · ` : '';
   const timeText = item.pubDate.toLocaleString('zh-CN', {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   });
-  // 描述摘要（最多 80 字）
-  const descSnippet = item.description ? truncateText(item.description, 80) : '';
+  const descSnippet = item.description ? truncateText(escapeHtml(item.description), 80) : '';
 
-  // 根据排名切换徽章颜色
-  const badgeColors = ['#ff4d4f', '#fa8c16', '#faad14'];
-  const badgeColor = badgeColors[index] || '#ff4d4f';
+  // TOP 徽章颜色
+  const badgeColors = ['#e74c3c', '#e67e22', '#f39c12'];
+  const badgeBg = badgeColors[index] || '#e74c3c';
 
   return `
-    <div style="margin: 16px 0; background: #fafafa; border-radius: 10px; border: 1px solid #f0f0f0; overflow: hidden;">
-      <table style="width: 100%; border-collapse: collapse;" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="width: 130px; vertical-align: top; padding: 0;">
-            <a href="${item.link}" target="_blank" style="display: block;">
-              <img src="${imageUrl}"
-                   alt="${item.title}"
-                   width="130" height="90"
-                   style="width: 130px; height: 90px; object-fit: cover; display: block; border-right: 1px solid #f0f0f0;"
-                   onerror="this.src='${FALLBACK_IMAGE}';">
-            </a>
-          </td>
-          <td style="padding: 12px 14px; vertical-align: top;">
-            <div style="margin-bottom: 6px;">
-              <span style="display: inline-block; background: ${badgeColor}; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 3px; font-weight: 600; letter-spacing: 0.5px;">
-                TOP ${index + 1}
-              </span>
-            </div>
-            <a href="${item.link}" target="_blank"
-               style="color: #1a1a1a; text-decoration: none; font-size: 15px; font-weight: 600; line-height: 1.6; display: block; margin-bottom: 4px;">
-              ${item.title}
-            </a>
+    <!-- 热点头条 #${index + 1} -->
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="margin: 12px 0; background-color: #fafafa; border: 1px solid #eeeeee;">
+      <tr>
+        <td width="130" valign="top" style="padding: 0;">
+          <a href="${escapeHtml(item.link)}" target="_blank">
+            ${
+              hasRealImage
+                ? `<img src="${escapeHtml(imageUrl)}" width="130" height="90"
+                     alt="" border="0"
+                     style="display: block; width: 130px; height: 90px; border: none;">`
+                : `<table width="130" height="90" cellpadding="0" cellspacing="0" border="0">
+                     <tr>
+                       <td width="130" height="90" align="center" valign="middle"
+                           style="background-color: #e8e8e8; font-size: 28px;">📰</td>
+                     </tr>
+                   </table>`
+            }
+          </a>
+        </td>
+        <td valign="top" style="padding: 10px 14px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td style="padding-bottom: 6px;">
+                <span style="display: inline-block; background-color: ${badgeBg}; color: #ffffff;
+                  font-size: 11px; padding: 2px 8px; font-weight: bold;">
+                  TOP ${index + 1}
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding-bottom: 4px;">
+                <a href="${escapeHtml(item.link)}" target="_blank"
+                   style="color: #1a1a1a; text-decoration: none; font-size: 15px; font-weight: bold; line-height: 1.5;">
+                  ${escapeHtml(item.title)}
+                </a>
+              </td>
+            </tr>
             ${
               descSnippet
-                ? `<p style="margin: 4px 0 6px; color: #666; font-size: 12px; line-height: 1.5;">${descSnippet}</p>`
+                ? `<tr>
+                     <td style="padding-bottom: 6px; color: #777777; font-size: 12px; line-height: 1.5;">
+                       ${descSnippet}
+                     </td>
+                   </tr>`
                 : ''
             }
-            <div style="color: #bbb; font-size: 11px;">
-              ${sourceText}${timeText}
-            </div>
-          </td>
-        </tr>
-      </table>
-    </div>
+            <tr>
+              <td style="color: #bbbbbb; font-size: 11px;">
+                ${sourceText}${timeText}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
   `;
 }
 
 /**
- * 构建列表项（第4条及以后，简洁列表）
+ * 构建列表项（第4条及以后）
  */
 function buildListItem(item: NewsItem, index: number): string {
-  const descSnippet = item.description ? truncateText(item.description, 60) : '';
+  const descSnippet = item.description ? truncateText(escapeHtml(item.description), 60) : '';
 
   return `
     <tr>
-      <td style="padding: 14px 10px; border-bottom: 1px solid #f5f5f5; vertical-align: top; width: 36px;">
-        <span style="display: inline-block; min-width: 24px; height: 24px; line-height: 24px; text-align: center;
-          background: #f0f5ff; color: #2f54eb; border-radius: 50%; font-size: 12px; font-weight: 600;">
+      <td width="36" valign="top" style="padding: 14px 10px; border-bottom: 1px solid #f0f0f0;">
+        <span style="display: inline-block; min-width: 24px; height: 24px; line-height: 24px;
+          text-align: center; background-color: #f0f5ff; color: #2f54eb; font-size: 12px; font-weight: bold;">
           ${index + 1}
         </span>
       </td>
-      <td style="padding: 14px 10px 14px 0; border-bottom: 1px solid #f5f5f5;">
-        <a href="${item.link}" style="color: #262626; text-decoration: none; font-size: 14px; line-height: 1.6;"
-           target="_blank">${item.title}</a>
+      <td valign="top" style="padding: 14px 10px 14px 0; border-bottom: 1px solid #f0f0f0;">
+        <a href="${escapeHtml(item.link)}" target="_blank"
+           style="color: #262626; text-decoration: none; font-size: 14px; line-height: 1.6; font-weight: 500;">
+          ${escapeHtml(item.title)}
+        </a>
         ${
           descSnippet
-            ? `<p style="margin: 4px 0 0; color: #999; font-size: 12px; line-height: 1.4;">${descSnippet}</p>`
+            ? `<p style="margin: 4px 0 0; color: #999999; font-size: 12px; line-height: 1.4;">${descSnippet}</p>`
             : ''
         }
-        <div style="margin-top: 4px; color: #bfbfbf; font-size: 11px;">
-          ${item.source ? `${item.source} · ` : ''}${item.pubDate.toLocaleString('zh-CN')}
-        </div>
+        <p style="margin: 4px 0 0; color: #bfbfbf; font-size: 11px;">
+          ${item.source ? `${escapeHtml(item.source)} · ` : ''}${item.pubDate.toLocaleString('zh-CN')}
+        </p>
       </td>
     </tr>
   `;
 }
 
 /**
- * 构建邮件 HTML 内容
+ * 构建邮件 HTML 内容（全面兼容 QQ邮箱 / 163 / Gmail / Outlook）
  */
 function buildEmailHtml(newsList: NewsItem[]): string {
   const today = new Date().toLocaleDateString('zh-CN', {
@@ -125,92 +151,133 @@ function buildEmailHtml(newsList: NewsItem[]): string {
     weekday: 'long',
   });
 
-  // 统计信息
   const sourceCount = new Set(newsList.map((n) => n.source).filter(Boolean)).size;
 
+  // 热点头条区
   const featuredSection =
     newsList.length > 0
       ? `
-        <div style="padding: 0 20px;">
-          <div style="font-size: 13px; color: #999; margin: 20px 0 10px; font-weight: 600; letter-spacing: 0.5px;">
-            🔥 热点头条
-          </div>
-          ${newsList.slice(0, 3).map((item, i) => buildFeaturedCard(item, i)).join('')}
-        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td style="padding: 16px 20px 4px;">
+              <span style="color: #999999; font-size: 13px; font-weight: bold;">🔥 热点头条</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0 20px;">
+              ${newsList.slice(0, 3).map((item, i) => buildFeaturedCard(item, i)).join('')}
+            </td>
+          </tr>
+        </table>
       `
       : '';
 
+  // 更多资讯区
   const listSection =
     newsList.length > 3
       ? `
-        <div style="padding: 0 20px;">
-          <div style="font-size: 13px; color: #999; margin: 24px 0 10px; font-weight: 600; letter-spacing: 0.5px;">
-            📰 更多资讯
-          </div>
-          <table style="width: 100%; border-collapse: collapse;" cellpadding="0" cellspacing="0">
-            <tbody>${newsList.slice(3).map((item, i) => buildListItem(item, i + 3)).join('')}</tbody>
-          </table>
-        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td style="padding: 20px 20px 4px;">
+              <span style="color: #999999; font-size: 13px; font-weight: bold;">📰 更多资讯</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0 20px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                ${newsList.slice(3).map((item, i) => buildListItem(item, i + 3)).join('')}
+              </table>
+            </td>
+          </tr>
+        </table>
       `
       : '';
 
-  const emptyState =
+  // 空状态
+  const emptySection =
     newsList.length === 0
       ? `
-        <div style="text-align: center; padding: 48px 20px; color: #999;">
-          <div style="font-size: 48px; margin-bottom: 12px;">📭</div>
-          <p style="margin: 0; font-size: 14px;">过去48小时内暂无相关新闻</p>
-        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td align="center" style="padding: 48px 20px; color: #999999;">
+              <p style="font-size: 48px; margin: 0 0 12px;">📭</p>
+              <p style="margin: 0; font-size: 14px;">过去48小时内暂无相关新闻</p>
+            </td>
+          </tr>
+        </table>
       `
+      : '';
+
+  // 统计信息行
+  const statsRow =
+    newsList.length > 0
+      ? `<tr>
+           <td align="center" style="padding: 4px 24px 16px; color: #aaaaaa; font-size: 11px;">
+             共 ${newsList.length} 条 · 来自 ${sourceCount} 个来源
+           </td>
+         </tr>`
       : '';
 
   return `
-    <!DOCTYPE html>
-    <html lang="zh-CN">
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>汽车膜行业早报</title>
-    </head>
-    <body style="margin: 0; padding: 24px 12px; background: #f0f2f5;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;">
-      <div style="max-width: 620px; margin: 0 auto; background: #fff; border-radius: 14px;
-        overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>汽车膜行业早报</title>
+</head>
+<body style="margin: 0; padding: 20px 12px; background-color: #f0f2f5;
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;">
 
-        <!-- 头部 -->
-        <div style="background: linear-gradient(135deg, #141e30 0%, #243b55 100%); color: #fff;
-          padding: 32px 24px; text-align: center;">
-          <div style="font-size: 32px; margin-bottom: 8px; line-height: 1;">🚗</div>
-          <h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 2px;">汽车膜行业早报</h1>
-          <p style="margin: 10px 0 0; opacity: 0.65; font-size: 13px;">${today}</p>
-          ${
-            newsList.length > 0
-              ? `<p style="margin: 6px 0 0; opacity: 0.45; font-size: 11px;">
-                  共 ${newsList.length} 条 · 来自 ${sourceCount} 个来源
-                </p>`
-              : ''
-          }
-        </div>
+  <!-- 外层容器 -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td align="center">
+        <table width="620" cellpadding="0" cellspacing="0" border="0"
+               style="background-color: #ffffff;">
 
-        <!-- 内容区 -->
-        ${emptyState}
-        ${featuredSection}
-        ${listSection}
+          <!-- ====== 头部 ====== -->
+          <tr>
+            <td align="center"
+                style="padding: 32px 24px; background-color: #1a2332; color: #ffffff;">
+              <p style="font-size: 32px; margin: 0 0 8px;">🚗</p>
+              <h1 style="margin: 0; font-size: 22px; font-weight: bold; letter-spacing: 2px;">
+                汽车膜行业早报
+              </h1>
+              <p style="margin: 10px 0 0; font-size: 13px; color: #8899aa;">${today}</p>
+            </td>
+          </tr>
 
-        <!-- 底部 -->
-        <div style="padding: 20px; text-align: center; color: #bfbfbf; font-size: 12px;
-          border-top: 1px solid #f0f0f0; margin-top: 16px; line-height: 1.8;">
-          <p style="margin: 0;">由 Morning Paper 自动生成 · 如需调整请联系管理员</p>
-          <p style="margin: 2px 0 0;">
-            📧 <a href="mailto:nolanpark246@gmail.com"
-               style="color: #2f54eb; text-decoration: none; font-weight: 500;">@nolantec</a>
-          </p>
-        </div>
+          ${statsRow}
 
-      </div>
-    </body>
-    </html>
-  `;
+          <!-- ====== 内容区 ====== -->
+          <tr>
+            <td>
+              ${emptySection}
+              ${featuredSection}
+              ${listSection}
+            </td>
+          </tr>
+
+          <!-- ====== 底部 ====== -->
+          <tr>
+            <td align="center"
+                style="padding: 20px 24px; border-top: 1px solid #f0f0f0; color: #bbbbbb; font-size: 12px; line-height: 1.8;">
+              <p style="margin: 0;">由 Morning Paper 自动生成 · 如需调整请联系管理员</p>
+              <p style="margin: 2px 0 0;">
+                📧 <a href="mailto:nolanpark246@gmail.com"
+                   style="color: #2f54eb; text-decoration: none; font-weight: 500;">@nolantec</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>`;
 }
 
 /**
