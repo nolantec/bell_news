@@ -16,8 +16,37 @@ export const CONFIG = {
   },
   schedule: process.env.SCHEDULE || '0 0 7 * * *',
   news: {
-    keywords: (process.env.NEWS_KEYWORDS || '汽车膜,隐形车衣,漆面保护膜').split(',').map((k) => k.trim()),
-    lang: process.env.NEWS_LANG || 'zh-CN',
-    maxCount: Number(process.env.NEWS_MAX_COUNT) || 10,
+    // 国内新闻
+    domestic: {
+      keywords:
+        (process.env.NEWS_DOMESTIC_KEYWORDS || process.env.NEWS_KEYWORDS || '汽车膜,隐形车衣,漆面保护膜,车窗膜,隔热膜,改色膜')
+          .split(',')
+          .map((k) => k.trim()),
+      hl: 'zh-CN',
+      gl: 'CN',
+      ceid: 'CN:zh-Hans',
+      maxCount: Number(process.env.NEWS_DOMESTIC_MAX_COUNT) || 5,
+    },
+    // 国际新闻（英文关键词）
+    international: {
+      keywords:
+        (process.env.NEWS_INTL_KEYWORDS || 'paint protection film,automotive window film,car wrap,PPF automotive')
+          .split(',')
+          .map((k) => k.trim()),
+      hl: 'en',
+      gl: 'US',
+      ceid: 'US:en',
+      maxCount: Number(process.env.NEWS_INTL_MAX_COUNT) || 5,
+    },
+  },
+  // DeepSeek AI 摘要（可选，不配置则无 AI 摘要）
+  ai: {
+    apiKey: process.env.DEEPSEEK_API_KEY || '',
+    enabled: !!process.env.DEEPSEEK_API_KEY,
+  },
+  // Tavily Search API（可选，用于解析真实文章链接）
+  tavily: {
+    apiKey: process.env.TAVILY_API_KEY || '',
+    enabled: !!process.env.TAVILY_API_KEY,
   },
 } as const;

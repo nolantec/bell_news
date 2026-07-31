@@ -33,6 +33,6 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
-          NEWS_KEYWORDS: ${{ secrets.NEWS_KEYWORDS }}
-          NEWS_LANG: ${{ secrets.NEWS_LANG }}
-          NEWS_MAX_COUNT: ${{ secrets.NEWS_MAX_COUNT }}
+          NEWS_DOMESTIC_KEYWORDS: ${{ secrets.NEWS_DOMESTIC_KEYWORDS }}
+          NEWS_INTL_KEYWORDS: ${{ secrets.NEWS_INTL_KEYWORDS }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}

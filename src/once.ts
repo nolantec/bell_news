@@ -1,20 +1,31 @@
 import { CONFIG } from './config';
-import { getTopNews } from './services/newsService';
+import { getUnifiedNews } from './services/newsService';
+import { generateBriefing } from './services/aiService';
 import { sendMail } from './services/mailService';
 
-/**
- * 一次性执行：抓取新闻并发送邮件（适用于 GitHub Actions / 手动触发）
- */
 async function runOnce(): Promise<void> {
   const startTime = Date.now();
   console.log(`[${new Date().toISOString()}] 开始执行早报任务...`);
 
   try {
-    console.log(`正在抓取关键词: ${CONFIG.news.keywords.join(', ')}`);
-    const newsList = await getTopNews(CONFIG.news.keywords, CONFIG.news.lang, CONFIG.news.maxCount);
-    console.log(`抓取到 ${newsList.length} 条新闻`);
+    const { domestic: dom, international: intl } = CONFIG.news;
+    console.log(`国内关键词: ${dom.keywords.join(', ')}`);
+    console.log(`国际关键词: ${intl.keywords.join(', ')}`);
 
-    await sendMail(newsList);
+    const newsList = await getUnifiedNews(
+      dom.keywords,
+      intl.keywords,
+      { hl: dom.hl, gl: dom.gl, ceid: dom.ceid },
+      { hl: intl.hl, gl: intl.gl, ceid: intl.ceid },
+      dom.maxCount,
+      intl.maxCount
+    );
+
+    console.log(`抓取完成: ${newsList.length} 条新闻`);
+
+    const aiBriefing = newsList.length > 0 ? await generateBriefing(newsList) : null;
+
+    await sendMail(newsList, aiBriefing);
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`[${new Date().toISOString()}] 任务完成，耗时 ${duration}s`);
