@@ -1,5 +1,3 @@
-import { CONFIG } from '../config';
-
 /**
  * 新闻数据类型定义
  */
@@ -10,6 +8,7 @@ export interface NewsItem {
   source?: string;
   description?: string;
   imageUrl?: string;
+  lang: 'zh' | 'en';
 }
 
 /**
@@ -99,67 +98,11 @@ function parseGoogleRss(xml: string): NewsItem[] {
       : undefined;
 
     if (title && link) {
-      items.push({ title, link, pubDate, source, description });
+      items.push({ title, link, pubDate, source, description, lang: 'zh' });
     }
   }
 
   return items;
-}
-
-/**
- * 从文章页面提取 OG 图片
- */
-async function fetchOgImage(url: string): Promise<string | undefined> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-      signal: controller.signal,
-      redirect: 'follow',
-    });
-    clearTimeout(timeout);
-
-    if (!response.ok) return undefined;
-
-    const html = await response.text();
-
-    const ogMatch = html.match(
-      /<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i
-    );
-    if (ogMatch) return ogMatch[1];
-
-    const twMatch = html.match(
-      /<meta[^>]+name="twitter:image"[^>]+content="([^"]+)"/i
-    );
-    if (twMatch) return twMatch[1];
-
-    const itemMatch = html.match(
-      /<meta[^>]+itemprop="image"[^>]+content="([^"]+)"/i
-    );
-    if (itemMatch) return itemMatch[1];
-
-    const imgMatch = html.match(/<img[^>]+src="(https?:\/\/[^"]+)"[^>]*>/i);
-    if (imgMatch) {
-      const src = imgMatch[1];
-      if (
-        !src.includes('logo') &&
-        !src.includes('icon') &&
-        !src.includes('avatar') &&
-        !src.includes('qr_code')
-      ) {
-        return src;
-      }
-    }
-
-    return undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -200,61 +143,6 @@ async function fetchGoogleNews(
 }
 
 /**
- * Tavily 搜索结果
- */
-interface TavilyResult {
-  url: string;
-  title: string;
-  content: string;
-}
-
-interface TavilyResponse {
-  results: TavilyResult[];
-  images?: { url: string; description?: string }[];
-}
-
-/**
- * 通过 Tavily Search API 搜索标题，获取真实 URL、摘要和相关图片
- */
-async function searchViaTavily(
-  title: string,
-  apiKey: string
-): Promise<{ result: TavilyResult; images: string[] } | undefined> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
-    const response = await fetch('https://api.tavily.com/search', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        query: title,
-        search_depth: 'basic',
-        max_results: 3,
-        include_images: true,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-
-    if (!response.ok) return undefined;
-
-    const data = (await response.json()) as TavilyResponse;
-    if (!data.results?.[0]) return undefined;
-
-    // 提取图片 URL（Tavily 根据 query 语义匹配的相关图片）
-    const images = (data.images || []).map((img) => img.url);
-
-    return { result: data.results[0], images };
-  } catch {
-    return undefined;
-  }
-}
-
-/**
  * 共享处理管道：抓取 → 去重 → 排序 → 时间过滤 → 切片 → 补图 → 解析真实链接
  */
 async function fetchAndProcessChannel(
@@ -262,7 +150,8 @@ async function fetchAndProcessChannel(
   locale: NewsLocale,
   maxCount: number,
   channelLabel: string,
-  timeWindowHours = 48
+  timeWindowHours = 48,
+  lang: 'zh' | 'en' = 'zh'
 ): Promise<NewsItem[]> {
   const allNews: NewsItem[] = [];
   const now = new Date();
@@ -284,12 +173,23 @@ async function fetchAndProcessChannel(
     allNews.push(...items);
   }
 
-  // 去重
-  const seenLinks = new Set<string>();
+  // 去重（关键词重叠 > 60% 视为重复）
+  const seenWords: string[][] = [];
   const uniqueNews = allNews.filter((item) => {
-    if (seenLinks.has(item.link)) return false;
-    seenLinks.add(item.link);
-    return true;
+    const words = item.title
+      .replace(/[【】\[\]（）()\d+.\s,-:：、，。！？\-\/&|]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 2);
+    const isDup = seenWords.some((existing) => {
+      const overlap = words.filter((w) => existing.includes(w)).length;
+      const minLen = Math.min(words.length, existing.length);
+      return minLen > 0 && overlap / minLen > 0.6;
+    });
+    if (!isDup) {
+      seenWords.push(words);
+      return true;
+    }
+    return false;
   });
 
   // 按时间倒序
@@ -308,54 +208,14 @@ async function fetchAndProcessChannel(
   const topNews = recentNews.slice(0, maxCount);
   console.log(`[${channelLabel}] 抓取到 ${topNews.length} 条新闻`);
 
-  // 链接解析 + 图片抓取
-  if (CONFIG.tavily.enabled) {
-    const enhancers = topNews.map(async (item) => {
-      // 搜索：标题 + 来源 + 行业限定词
-      const q = `${item.title.slice(0, 60)} ${item.source || ''} 汽车膜 隐形车衣 PPF`;
-      const data = await searchViaTavily(q, CONFIG.tavily.apiKey);
-      if (data) {
-        const { url, content } = data.result;
-        // 权威域名
-        const AUTH = [
-          'grandviewresearch', 'fortunebusinessinsights', 'coherentmarketinsights',
-          'researchnester', 'marketsandmarkets',
-          'xpel.com', '3m.com', 'eastman', 'lubrizol', 'saint-gobain',
-          'autohome.com.cn', 'chejiahao.autohome', 'stcn.com',
-          '163.com', 'sohu.com', 'sina.com.cn', 'thepaper.cn', 'cls.cn',
-          'qq.com', 'ifeng.com', 'eastmoney.com',
-          'reuters.com', 'bloomberg.com', 'prnewswire.com', 'businesswire',
-          'usatoday.com', 'finance.yahoo.com', 'barchart.com',
-          'snsinsider.com', 'narppf.com.cn', 'windowfilmmag.com',
-        ];
-        const BLOCK = [
-          'bilibili.com', 'xiaohongshu', 'zhihu.com', 'tieba.baidu.com',
-          'club.autohome', 'chejiahao.m.autohome', 'k.sina.com.cn',
-          'info.b2b168', '24-7pressrelease', 'maigoo.com', 'mg21.com',
-          'twiistedmedia.com', 'ranking', 'top10', 'brandlist', '163.com/dy/media',
-        ];
-        const ok = AUTH.some(d => url.includes(d)) && !BLOCK.some(d => url.includes(d));
-        if (ok) {
-          console.log(`  [链接] ✓ ${item.title.slice(0, 20)}... → ${url.slice(0, 50)}...`);
-          item.link = url;
-          if (content.length > (item.description?.length || 0)) item.description = content.slice(0, 400);
-          if (!item.imageUrl && data.images.length > 0) item.imageUrl = data.images[0];
-        } else {
-          item.link = `https://www.baidu.com/s?wd=${encodeURIComponent(item.title + ' ' + (item.source || ''))}`;
-        }
-      } else {
-        item.link = `https://www.baidu.com/s?wd=${encodeURIComponent(item.title + ' ' + (item.source || ''))}`;
-      }
-      if (!item.imageUrl) item.imageUrl = await fetchOgImage(item.link);
-      return item;
-    });
-    await Promise.all(enhancers);
-  } else {
-    const imgs = topNews.slice(0, 3).map(async (item) => {
-      if (!item.imageUrl) item.imageUrl = await fetchOgImage(item.link);
-      return item;
-    });
-    await Promise.all(imgs);
+  // 链接策略：中文百度、英文 Bing
+  for (const item of topNews) {
+    item.lang = lang;
+    if (lang === 'zh') {
+      item.link = `https://www.baidu.com/s?wd=${encodeURIComponent(item.title)}`;
+    } else {
+      item.link = `https://cn.bing.com/search?q=${encodeURIComponent(item.title)}`;
+    }
   }
 
   return topNews;
@@ -374,18 +234,34 @@ export async function getUnifiedNews(
   totalMax = 10
 ): Promise<NewsItem[]> {
   const [domestic, international] = await Promise.all([
-    fetchAndProcessChannel(domesticKeywords, domesticLocale, domesticMax, '国内', 48),
-    fetchAndProcessChannel(intlKeywords, intlLocale, intlMax, '国际', 720),
+    fetchAndProcessChannel(domesticKeywords, domesticLocale, domesticMax, '国内', 48, 'zh'),
+    fetchAndProcessChannel(intlKeywords, intlLocale, intlMax, '国际', 720, 'en'),
   ]);
 
-  // 合并去重
+  // 合并去重（关键词重叠 > 60% 视为重复）
   const all = [...domestic, ...international];
-  const seen = new Set<string>();
   const merged: NewsItem[] = [];
+  const seenTitles: string[][] = [];
+
   for (const item of all) {
-    if (seen.has(item.link)) continue;
-    seen.add(item.link);
-    merged.push(item);
+    const words = item.title
+      .replace(/[【】\[\]（）()\d+.\s,-:：、，。！？\-\/&|]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 2);
+
+    // 检查与已有标题的重叠度
+    const isDup = seenTitles.some((existingWords) => {
+      const overlap = words.filter((w) => existingWords.includes(w)).length;
+      const minLen = Math.min(words.length, existingWords.length);
+      return minLen > 0 && overlap / minLen > 0.6;
+    });
+
+    if (!isDup) {
+      seenTitles.push(words);
+      merged.push(item);
+    } else {
+      console.log(`  [去重] 跳过重复: ${item.title.slice(0, 40)}...`);
+    }
   }
 
   // 按时间排序，取前 N

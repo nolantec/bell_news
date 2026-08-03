@@ -68,61 +68,69 @@ export async function generateBriefing(newsList: NewsItem[]): Promise<AiBriefing
 
   const prompt = buildPrompt(newsList);
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120000);
+  // 重试 3 次，应对网络抖动
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000);
 
-    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${CONFIG.ai.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          {
-            role: 'system',
-            content:
-              '你是汽车膜行业首席分析师。每条 summary 四段式每段至少100字，总460-550字。信息密度高，读完掌握全局。只输出 JSON。',
-          },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.7,
-        max_tokens: 25000,
-        frequency_penalty: 0.2,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
+      const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${CONFIG.ai.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            {
+              role: 'system',
+              content:
+                '你是汽车膜行业首席分析师。每条 summary 四段式每段至少100字，总460-550字。信息密度高，读完掌握全局。只输出 JSON。',
+            },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 25000,
+          frequency_penalty: 0.2,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
 
-    if (!response.ok) {
-      console.error(`DeepSeek API 错误: ${response.status}`);
-      return null;
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = (await response.json()) as { choices: { message: { content: string } }[] };
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) throw new Error('空响应');
+
+      let jsonStr = content.trim();
+      if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+
+      const briefing = JSON.parse(jsonStr) as AiBriefing;
+      if (!Array.isArray(briefing.analyses) || briefing.analyses.length === 0) {
+        throw new Error('格式不正确');
+      }
+
+      const avgLen = Math.round(
+        briefing.analyses.reduce((s, a) => s + a.summary.length, 0) / briefing.analyses.length
+      );
+      console.log(`AI 分析完成: ${briefing.analyses.length} 条, 平均 ${avgLen} 字/条`);
+      return briefing;
+    } catch (err) {
+      if (attempt < 3) {
+        console.log(`AI 请求失败 (第${attempt}次), 1秒后重试...`);
+        await new Promise((r) => setTimeout(r, 1000));
+      } else {
+        console.error('AI 分析失败(已重试3次):', err);
+        return null;
+      }
     }
-
-    const data = (await response.json()) as { choices: { message: { content: string } }[] };
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) { console.error('DeepSeek 返回空'); return null; }
-
-    let jsonStr = content.trim();
-    if (jsonStr.startsWith('```')) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
-    }
-
-    const briefing = JSON.parse(jsonStr) as AiBriefing;
-    if (!Array.isArray(briefing.analyses) || briefing.analyses.length === 0) {
-      console.error('AI 返回格式不正确');
-      return null;
-    }
-
-    const avgLen = Math.round(
-      briefing.analyses.reduce((s, a) => s + a.summary.length, 0) / briefing.analyses.length
-    );
-    console.log(`AI 分析完成: ${briefing.analyses.length} 条, 平均 ${avgLen} 字/条`);
-    return briefing;
-  } catch (err) {
-    console.error('AI 分析失败:', err);
-    return null;
   }
+
+  return null;
 }
