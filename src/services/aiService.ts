@@ -11,76 +11,66 @@ export interface AiBriefing {
   analyses: AiNewsAnalysis[];
 }
 
-/**
- * 构建综合趋势分析 prompt
- * 核心思路：不逐条翻译新闻，而是综合所有信息源归纳出 10 条行业动态与趋势
- */
 function buildPrompt(newsList: NewsItem[]): string {
-  // 整理所有新闻数据供 AI 参考
   const newsData = newsList
     .map(
       (n, i) =>
-        `[来源${i + 1}] 标题：${n.title}\n来源：${n.source || '未知'}\n内容：${n.description || '无'}`
+        `[来源${i + 1}] 标题：${n.title}\n出处：${n.source || '未知'}\n摘要：${n.description || '无'}`
     )
     .join('\n\n');
 
-  return `你是一位资深汽车膜行业分析师，为专业投资者和从业者撰写每日行业趋势简报。
+  return `你是汽车膜行业首席分析师，为专业投资机构和产业从业者撰写每日深度早报。
 
-以下是今天抓取到的 ${newsList.length} 条汽车膜行业相关新闻数据，涵盖国内外多家专业市场研究机构、行业协会、膜企官方发布以及汽车后市场权威媒体的信息。
+以下是今天抓取到的 ${newsList.length} 条汽车膜行业信息，涵盖 TPU 隐形车衣、汽车窗膜、车身改色膜、汽车打印膜等全品类。
 
-## 原始新闻数据
+## 原始信息
 ${newsData}
 
-## 任务要求
+## 核心要求
 
-请基于以上信息，综合归纳整理出 **10 条行业动态与趋势**。每条要求：
+基于以上信息，综合归纳出 **10 条行业核心动态与趋势**。每条必须包含：
 
-1. **headline**（精炼标题，不超过 30 字）：
-   - 提炼核心趋势或关键事件
-   - 如涉及具体数据（市场规模、增长率、份额等）务必在标题中体现
+1. **headline**（≤25字）：提炼核心结论，含关键数据
+2. **summary**（用以下格式输出，四段式，总 460-550 字）：
+   • 核心观点：（至少 100 字）点明趋势本质和关键数据
+   • 数据支撑：（至少 120 字）引用具体数据和信息源
+   • 行业影响：（至少 120 字）分析对产业链的具体影响
+   • 趋势展望：（至少 120 字）预判走向、机会和风险
+   每段以"• 子标题："开头，总字数控制在 460-550 字，段间无空行
 
-2. **summary**（深度分析摘要，4-6 句话）：
-   - 综合多条相关信息源，形成完整的行业洞察
-   - 标注信息来源（如"据 Grand View Research 报告显示...""膜企 XPEL 官方宣布...""行业协会数据显示..."）
-   - 补充行业背景：市场规模、竞争格局、技术路线、政策法规
-   - 说明该动态对汽车膜行业（PPF/窗膜/改色膜）的影响
-   - 如涉及具体企业名、品牌名、数据，务必保留
-   - 不要简单翻译或复述标题，要有分析和洞察
+## 覆盖维度
+- 市场规模/增长预测/区域分析
+- 企业战略/融资并购/产能扩张
+- 技术创新/新品发布/材料突破
+- 政策法规/行业标准/质保认证
+- 渠道变革/消费趋势/服务升级
 
-## 覆盖范围要求
-- 涵盖 PPF 隐形车衣、隔热窗膜、改色膜三大品类
-- 兼顾市场规模/预测、企业战略/合作、技术研发/新品、政策法规、渠道/服务等维度
-- 国内和国际信息自然融合，不刻意区分
+## 写作参考
+"• 核心观点：全球汽车贴膜市场正经历结构性增长，中国以 42% 区域份额持续领跑，TPU 隐形车衣向中端车型加速渗透成为核心驱动力。
+• 数据支撑：据 Grand View Research 最新报告，2026 年全球汽车贴膜市场规模预计达 139 亿美元，2033 年将增至 263 亿美元，年复合增长率 9.6%。装贴率从 2023 年不足 5% 提升至 2026 年 15% 以上。
+• 行业影响：电动汽车全景天幕普及催生高效隔热膜结构性需求，TPU 粒子供应波动和低价劣质膜扰乱市场秩序成为行业主要挑战。头部膜企加速自建生产线和正品溯源体系应对。
+• 趋势展望：技术领先的头部膜企和具备规模化成本优势的国产品牌将在下一轮竞争中占据有利位置。欧美多地对车窗透光率法规趋严将倒逼高透光高隔热纳米膜研发加速。"
 
-## 参考风格
-"据 Grand View Research 发布的最新市场报告，2026 年全球汽车贴膜市场规模预计达 139 亿美元，并将在 2033 年增长至 263 亿美元。随着全球电动汽车销量剧增，大面积全景天幕的普及促使车主对高效能隔热与防紫外线保护膜的需求显著上升。亚太地区以 42% 的市场份额占据领先地位，中国作为全球最大汽车市场继续成为增长核心驱动力。"
-
-请严格按照以下 JSON 格式输出，不要输出任何其他内容：
+严格输出 JSON，无其他内容。共 10 条，index 0-9：
 {
   "analyses": [
-    { "index": 0, "headline": "趋势标题...", "summary": "深度分析..." },
-    { "index": 1, "headline": "趋势标题...", "summary": "深度分析..." }
+    { "index": 0, "headline": "…", "summary": "约400字的深度分析…" }
   ]
+}`;
 }
 
-共输出 10 条，index 从 0 到 9。`;
-}
-
-export async function generateBriefing(
-  newsList: NewsItem[]
-): Promise<AiBriefing | null> {
+export async function generateBriefing(newsList: NewsItem[]): Promise<AiBriefing | null> {
   if (!CONFIG.ai.enabled || !CONFIG.ai.apiKey) {
     console.log('DeepSeek API Key 未配置，跳过 AI 深度分析');
     return null;
   }
-
   if (newsList.length === 0) return null;
 
   const prompt = buildPrompt(newsList);
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60000);
+    const timeout = setTimeout(() => controller.abort(), 120000);
 
     const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
@@ -94,31 +84,26 @@ export async function generateBriefing(
           {
             role: 'system',
             content:
-              '你是一位资深汽车膜行业分析师。你的分析专业、有数据支撑、有行业洞察，综合多家机构信息形成完整观点。只输出 JSON。',
+              '你是汽车膜行业首席分析师。每条 summary 四段式每段至少100字，总460-550字。信息密度高，读完掌握全局。只输出 JSON。',
           },
           { role: 'user', content: prompt },
         ],
-        temperature: 0.5,
-        max_tokens: 6000,
+        temperature: 0.7,
+        max_tokens: 25000,
+        frequency_penalty: 0.2,
       }),
       signal: controller.signal,
     });
     clearTimeout(timeout);
 
     if (!response.ok) {
-      console.error(`DeepSeek API 返回错误: ${response.status}`);
+      console.error(`DeepSeek API 错误: ${response.status}`);
       return null;
     }
 
-    const data = (await response.json()) as {
-      choices: { message: { content: string } }[];
-    };
-
+    const data = (await response.json()) as { choices: { message: { content: string } }[] };
     const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      console.error('DeepSeek API 返回空内容');
-      return null;
-    }
+    if (!content) { console.error('DeepSeek 返回空'); return null; }
 
     let jsonStr = content.trim();
     if (jsonStr.startsWith('```')) {
@@ -126,16 +111,18 @@ export async function generateBriefing(
     }
 
     const briefing = JSON.parse(jsonStr) as AiBriefing;
-
     if (!Array.isArray(briefing.analyses) || briefing.analyses.length === 0) {
-      console.error('AI 返回数据格式不正确');
+      console.error('AI 返回格式不正确');
       return null;
     }
 
-    console.log(`AI 行业趋势分析完成: ${briefing.analyses.length} 条`);
+    const avgLen = Math.round(
+      briefing.analyses.reduce((s, a) => s + a.summary.length, 0) / briefing.analyses.length
+    );
+    console.log(`AI 分析完成: ${briefing.analyses.length} 条, 平均 ${avgLen} 字/条`);
     return briefing;
   } catch (err) {
-    console.error('AI 分析生成失败:', err);
+    console.error('AI 分析失败:', err);
     return null;
   }
 }

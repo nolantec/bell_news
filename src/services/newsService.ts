@@ -308,42 +308,54 @@ async function fetchAndProcessChannel(
   const topNews = recentNews.slice(0, maxCount);
   console.log(`[${channelLabel}] 抓取到 ${topNews.length} 条新闻`);
 
-  // Tavily 解析真实链接 + 语义匹配图片
+  // 链接解析 + 图片抓取
   if (CONFIG.tavily.enabled) {
     const enhancers = topNews.map(async (item) => {
-      const data = await searchViaTavily(item.title, CONFIG.tavily.apiKey);
+      // 搜索：标题 + 来源 + 行业限定词
+      const q = `${item.title.slice(0, 60)} ${item.source || ''} 汽车膜 隐形车衣 PPF`;
+      const data = await searchViaTavily(q, CONFIG.tavily.apiKey);
       if (data) {
-        console.log(`  [Tavily] ✓ ${item.title.slice(0, 30)}... → ${data.result.url.slice(0, 60)}...`);
-        item.link = data.result.url;
-        if (data.result.content && data.result.content.length > (item.description?.length || 0)) {
-          item.description = data.result.content.slice(0, 300);
-        }
-        if (!item.imageUrl && data.images.length > 0) {
-          item.imageUrl = data.images[0];
-          console.log(`  [图片] ✓ Tavily 语义匹配 (${data.images.length} 张可选)`);
+        const { url, content } = data.result;
+        // 权威域名
+        const AUTH = [
+          'grandviewresearch', 'fortunebusinessinsights', 'coherentmarketinsights',
+          'researchnester', 'marketsandmarkets',
+          'xpel.com', '3m.com', 'eastman', 'lubrizol', 'saint-gobain',
+          'autohome.com.cn', 'chejiahao.autohome', 'stcn.com',
+          '163.com', 'sohu.com', 'sina.com.cn', 'thepaper.cn', 'cls.cn',
+          'qq.com', 'ifeng.com', 'eastmoney.com',
+          'reuters.com', 'bloomberg.com', 'prnewswire.com', 'businesswire',
+          'usatoday.com', 'finance.yahoo.com', 'barchart.com',
+          'snsinsider.com', 'narppf.com.cn', 'windowfilmmag.com',
+        ];
+        const BLOCK = [
+          'bilibili.com', 'xiaohongshu', 'zhihu.com', 'tieba.baidu.com',
+          'club.autohome', 'chejiahao.m.autohome', 'k.sina.com.cn',
+          'info.b2b168', '24-7pressrelease', 'maigoo.com', 'mg21.com',
+          'twiistedmedia.com', 'ranking', 'top10', 'brandlist', '163.com/dy/media',
+        ];
+        const ok = AUTH.some(d => url.includes(d)) && !BLOCK.some(d => url.includes(d));
+        if (ok) {
+          console.log(`  [链接] ✓ ${item.title.slice(0, 20)}... → ${url.slice(0, 50)}...`);
+          item.link = url;
+          if (content.length > (item.description?.length || 0)) item.description = content.slice(0, 400);
+          if (!item.imageUrl && data.images.length > 0) item.imageUrl = data.images[0];
+        } else {
+          item.link = `https://www.baidu.com/s?wd=${encodeURIComponent(item.title + ' ' + (item.source || ''))}`;
         }
       } else {
-        console.log(`  [Tavily] ✗ ${item.title.slice(0, 30)}... 未解析到链接 → 使用百度搜索`);
-        item.link = `https://www.baidu.com/s?wd=${encodeURIComponent(item.title)}`;
+        item.link = `https://www.baidu.com/s?wd=${encodeURIComponent(item.title + ' ' + (item.source || ''))}`;
       }
-      // 回退：从文章页抓取 og:image
-      if (!item.imageUrl) {
-        item.imageUrl = await fetchOgImage(item.link);
-        if (item.imageUrl) console.log(`  [图片] ✓ 文章页 og:image`);
-      }
+      if (!item.imageUrl) item.imageUrl = await fetchOgImage(item.link);
       return item;
     });
     await Promise.all(enhancers);
   } else {
-    // 无 Tavily：仅前3条抓取图片
-    const topThree = topNews.slice(0, 3);
-    const imageFetchers = topThree.map(async (item) => {
-      if (!item.imageUrl) {
-        item.imageUrl = await fetchOgImage(item.link);
-      }
+    const imgs = topNews.slice(0, 3).map(async (item) => {
+      if (!item.imageUrl) item.imageUrl = await fetchOgImage(item.link);
       return item;
     });
-    await Promise.all(imageFetchers);
+    await Promise.all(imgs);
   }
 
   return topNews;

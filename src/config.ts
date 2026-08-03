@@ -19,7 +19,7 @@ export const CONFIG = {
     // 国内新闻
     domestic: {
       keywords:
-        (process.env.NEWS_DOMESTIC_KEYWORDS || process.env.NEWS_KEYWORDS || '汽车膜,隐形车衣,漆面保护膜,车窗膜,隔热膜,改色膜')
+        (process.env.NEWS_DOMESTIC_KEYWORDS || process.env.NEWS_KEYWORDS || '汽车膜,隐形车衣,漆面保护膜,车窗膜,隔热膜,改色膜,TPU车衣,汽车窗膜,车身改色膜,汽车打印膜')
           .split(',')
           .map((k) => k.trim()),
       hl: 'zh-CN',
