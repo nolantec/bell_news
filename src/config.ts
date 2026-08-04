@@ -44,9 +44,4 @@ export const CONFIG = {
     apiKey: process.env.DEEPSEEK_API_KEY || '',
     enabled: !!process.env.DEEPSEEK_API_KEY,
   },
-  // Tavily Search API（可选，用于解析真实文章链接）
-  tavily: {
-    apiKey: process.env.TAVILY_API_KEY || '',
-    enabled: !!process.env.TAVILY_API_KEY,
-  },
 } as const;

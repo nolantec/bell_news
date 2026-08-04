@@ -3,6 +3,7 @@ import { CONFIG } from './config';
 import { getUnifiedNews } from './services/newsService';
 import { generateBriefing } from './services/aiService';
 import { sendMail } from './services/mailService';
+import { qualityCheck } from './services/qaService';
 
 /**
  * 执行一次完整的抓取+摘要+发送流程
@@ -31,7 +32,16 @@ async function runJob(): Promise<void> {
     // 2. AI 综合归纳行业趋势
     const aiBriefing = newsList.length > 0 ? await generateBriefing(newsList) : null;
 
-    // 3. 发送邮件
+    // 3. 质检把关
+    const qa = qualityCheck(newsList, aiBriefing);
+    if (qa.warnings.length > 0) console.log(`⚠️ 质检警告:\n  ${qa.warnings.join('\n  ')}`);
+    if (!qa.passed) {
+      console.error(`❌ 质检不通过:\n  ${qa.errors.join('\n  ')}`);
+      return;
+    }
+    console.log('✅ 质检通过');
+
+    // 4. 发送邮件
     await sendMail(newsList, aiBriefing);
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);

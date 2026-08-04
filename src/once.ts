@@ -25,6 +25,20 @@ async function runOnce(): Promise<void> {
 
     const aiBriefing = newsList.length > 0 ? await generateBriefing(newsList) : null;
 
+    // 质检把关
+    const { qualityCheck } = await import('./services/qaService');
+    const qa = qualityCheck(newsList, aiBriefing);
+
+    if (qa.warnings.length > 0) {
+      console.log(`⚠️ 质检警告:\n  ${qa.warnings.join('\n  ')}`);
+    }
+
+    if (!qa.passed) {
+      console.error(`❌ 质检不通过，取消发送:\n  ${qa.errors.join('\n  ')}`);
+      process.exit(1);
+    }
+
+    console.log('✅ 质检通过');
     await sendMail(newsList, aiBriefing);
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
