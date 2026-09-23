@@ -31,12 +31,12 @@ ${newsData}
 基于以上信息，综合归纳出 **10 条行业核心动态与趋势**。每条必须包含：
 
 1. **headline**（≤25字）：提炼核心结论，含关键数据
-2. **summary**（用以下格式输出，四段式，总 460-550 字）：
-   • 核心观点：（至少 100 字）点明趋势本质和关键数据
-   • 数据支撑：（至少 120 字）引用具体数据和信息源
-   • 行业影响：（至少 120 字）分析对产业链的具体影响
-   • 趋势展望：（至少 120 字）预判走向、机会和风险
-   每段以"• 子标题："开头，总字数控制在 460-550 字，段间无空行
+2. **summary**（用以下格式输出，四段式，总 350-450 字）：
+   • 核心观点：（至少 80 字）点明趋势本质和关键数据
+   • 数据支撑：（至少 90 字）引用具体数据和信息源
+   • 行业影响：（至少 90 字）分析对产业链的具体影响
+   • 趋势展望：（至少 90 字）预判走向、机会和风险
+   每段以"• 子标题："开头，总字数控制在 350-450 字，段间无空行
 
 ## 覆盖维度
 - 市场规模/增长预测/区域分析
@@ -59,7 +59,7 @@ ${newsData}
 }`;
 }
 
-export async function generateBriefing(newsList: NewsItem[]): Promise<AiBriefing | null> {
+export async function generateBriefing(newsList: NewsItem[], isRetry = false): Promise<AiBriefing | null> {
   if (!CONFIG.ai.enabled || !CONFIG.ai.apiKey) {
     console.log('DeepSeek API Key 未配置，跳过 AI 深度分析');
     return null;
@@ -86,12 +86,14 @@ export async function generateBriefing(newsList: NewsItem[]): Promise<AiBriefing
             {
               role: 'system',
               content:
-                '你是汽车膜行业首席分析师。每条 summary 四段式每段至少100字，总460-550字。信息密度高，读完掌握全局。只输出 JSON。',
+                isRetry
+                ? '你是汽车膜行业首席分析师。⚠️ 严格要求：每条 summary 四段式每段至少80字，总350-450字。上次输出字数不足，这次务必写够字数，每段都要充分展开论述，达到字数要求再结束。只输出 JSON。'
+                : '你是汽车膜行业首席分析师。每条 summary 四段式每段至少80字，总350-450字。信息密度高，读完掌握全局。只输出 JSON。',
             },
             { role: 'user', content: prompt },
           ],
-          temperature: 0.7,
-          max_tokens: 25000,
+          temperature: isRetry ? 0.5 : 0.7,
+          max_tokens: 30000,
           frequency_penalty: 0.2,
         }),
         signal: controller.signal,

@@ -37,10 +37,10 @@ export function qualityCheck(
       const a = aiBriefing.analyses[i];
       const len = a.summary.length;
 
-      if (len < 300) {
-        errors.push(`第${i + 1}条摘要过短(${len}字)，需≥300字`);
-      } else if (len < 400) {
-        warnings.push(`第${i + 1}条摘要偏短(${len}字，建议≥400字)`);
+      if (len < 250) {
+        errors.push(`第${i + 1}条摘要过短(${len}字)，需≥250字`);
+      } else if (len < 300) {
+        warnings.push(`第${i + 1}条摘要偏短(${len}字，建议≥300字)`);
       }
 
       // 四段式检查

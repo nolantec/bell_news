@@ -23,23 +23,35 @@ async function runOnce(): Promise<void> {
 
     console.log(`抓取完成: ${newsList.length} 条新闻`);
 
-    const aiBriefing = newsList.length > 0 ? await generateBriefing(newsList) : null;
+    let aiBriefing = newsList.length > 0 ? await generateBriefing(newsList) : null;
 
     // 质检把关
     const { qualityCheck } = await import('./services/qaService');
-    const qa = qualityCheck(newsList, aiBriefing);
+    let qa = qualityCheck(newsList, aiBriefing);
 
     if (qa.warnings.length > 0) {
       console.log(`⚠️ 质检警告:\n  ${qa.warnings.join('\n  ')}`);
     }
 
+    // 质检不通过时，用更严格的 prompt 重试一次
+    if (!qa.passed && aiBriefing) {
+      console.log('🔄 质检不通过，用更严格的字数要求重试 AI 分析...');
+      aiBriefing = await generateBriefing(newsList, true);
+      if (aiBriefing) {
+        qa = qualityCheck(newsList, aiBriefing);
+        if (qa.warnings.length > 0) {
+          console.log(`⚠️ 重试后质检警告:\n  ${qa.warnings.join('\n  ')}`);
+        }
+      }
+    }
+
     if (!qa.passed) {
-      console.error(`❌ 质检不通过，取消发送:\n  ${qa.errors.join('\n  ')}`);
+      console.error(`❌ 重试后质检仍不通过，取消发送:\n  ${qa.errors.join('\n  ')}`);
       process.exit(1);
     }
 
     console.log('✅ 质检通过');
-    await sendMail(newsList, aiBriefing);
+    await sendMail(newsList, aiBriefing!);
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`[${new Date().toISOString()}] 任务完成，耗时 ${duration}s`);
