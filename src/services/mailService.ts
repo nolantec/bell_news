@@ -69,9 +69,10 @@ function buildEmailHtml(
   newsList: NewsItem[],
   aiBriefing: AiBriefing | null
 ): string {
-  const today = new Date().toLocaleDateString('zh-CN', {
-    year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
-  });
+  // 刊头日期用数字格式（2026.09.23），比中文长日期更像报刊刊头
+  const dateNumeric = new Date()
+    .toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    .replace(/\//g, '.');
 
   const analysisMap = new Map((aiBriefing?.analyses || []).map((a) => [a.index, a]));
 
@@ -96,8 +97,8 @@ function buildEmailHtml(
 
   <!-- 头部 -->
   <tr>
-    <td align="center" style="padding:0;position:relative;width:620px;height:220px;
-      background-color:#e0f2fe;background-size:cover;background-position:center;
+    <td align="left" style="padding:0;position:relative;width:620px;height:220px;
+      background-color:#0f172a;background-size:cover;background-position:center;
       background-image:url('${HEAD_BG_IMAGE}');" background="${HEAD_BG_IMAGE}">
       <!--[if gte mso 9]>
       <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false"
@@ -106,17 +107,32 @@ function buildEmailHtml(
         <v:textbox inset="0,0,0,0">
       <![endif]-->
       <table width="100%" height="220" cellpadding="0" cellspacing="0" border="0">
-        <tr><td align="center" valign="middle">
-          <table cellpadding="0" cellspacing="0" border="0">
-            <tr><td align="center" style="padding:18px 28px;
-              background:rgba(255,255,255,0.88);color:#0f172a;border-radius:12px;">
-              <p style="font-size:11px;margin:0 0 6px;letter-spacing:3px;color:#0ea5e9;">MORNING PAPER</p>
-              <h1 style="margin:0;font-size:22px;font-weight:700;letter-spacing:2px;color:#0f172a;">
-              汽车膜行业早报</h1>
-              <p style="margin:8px 0 0;font-size:12px;color:#64748b;">${today} · ${newsList.length} 条趋势</p>
-            </td></tr>
-          </table>
-        </td></tr>
+        <tr>
+          <td align="left" valign="bottom" style="height:220px;padding:0 40px 26px;
+            background:linear-gradient(180deg,rgba(15,23,42,0.28) 0%,rgba(15,23,42,0.82) 100%);">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="left" valign="bottom">
+                  <h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-0.5px;
+                    line-height:1.15;color:#ffffff;">汽车膜行业早报</h1>
+                </td>
+                <td align="right" valign="bottom" style="white-space:nowrap;
+                  font-size:13px;color:rgba(255,255,255,0.75);">${dateNumeric}</td>
+              </tr>
+              <tr>
+                <td colspan="2" style="padding:16px 0 0;">
+                  <div style="border-top:1px solid rgba(255,255,255,0.28);
+                    font-size:0;line-height:0;">&nbsp;</div>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="2" align="left" style="padding:10px 0 0;font-size:11px;
+                  letter-spacing:0.5px;color:rgba(255,255,255,0.62);">
+                  ${newsList.length} 条趋势 · MORNING PAPER</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
       </table>
       <!--[if gte mso 9]></v:textbox></v:rect><![endif]-->
     </td>
@@ -136,9 +152,12 @@ function buildEmailHtml(
   <tr>
     <td align="center" style="padding:20px;border-top:1px solid #e8ecf1;
       color:#94a3b8;font-size:11px;line-height:1.8;">
-      <p style="margin:0;">Morning Paper 自动生成 · 如需调整请联系</p>
-      <p style="margin:0;">📧 <a href="mailto:nolanpark246@gmail.com"
-         style="color:#0ea5e9;text-decoration:none;font-weight:500;">@nolantec</a></p>
+      <p style="margin:0;">Morning Paper · 每日汽车膜行业早报</p>
+      <p style="margin:0;">本邮件由 AI 综合全球市场研究机构、行业协会、膜企及权威媒体信息自动生成，</p>
+      <p style="margin:0;">仅供行业交流参考，不构成投资建议。</p>
+      <p style="margin:0;">如需调整、投稿或退订，请联系 Roy ·
+        <a href="mailto:jinliang.lee@hotmail.com"
+           style="color:#0ea5e9;text-decoration:none;font-weight:500;">jinliang.lee@hotmail.com</a></p>
     </td>
   </tr>
 
