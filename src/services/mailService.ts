@@ -97,19 +97,20 @@ function buildEmailHtml(
 
   <!-- 头部 -->
   <tr>
-    <td align="left" style="padding:0;position:relative;width:620px;height:220px;
+    <td align="left" bgcolor="#0f172a" style="padding:0;width:620px;height:220px;
       background-color:#0f172a;background-size:cover;background-position:center;
       background-image:url('${HEAD_BG_IMAGE}');" background="${HEAD_BG_IMAGE}">
       <!--[if gte mso 9]>
       <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false"
-        style="width:620px;height:220px;position:absolute;top:0;left:0;">
-        <v:fill type="frame" src="${HEAD_BG_IMAGE}"/>
+        style="width:620px;height:220px;">
+        <v:fill type="frame" src="${HEAD_BG_IMAGE}" color="#0f172a"/>
         <v:textbox inset="0,0,0,0">
       <![endif]-->
       <table width="100%" height="220" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td align="left" valign="bottom" style="height:220px;padding:0 40px 26px;
-            background:linear-gradient(180deg,rgba(15,23,42,0.28) 0%,rgba(15,23,42,0.82) 100%);">
+            background-color:transparent;
+            background-image:linear-gradient(180deg,rgba(15,23,42,0.28) 0%,rgba(15,23,42,0.82) 100%);">
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td align="left" valign="bottom">
@@ -117,17 +118,18 @@ function buildEmailHtml(
                     line-height:1.15;color:#ffffff;">汽车膜行业早报</h1>
                 </td>
                 <td align="right" valign="bottom" style="white-space:nowrap;
-                  font-size:13px;color:rgba(255,255,255,0.75);">${dateNumeric}</td>
+                  font-size:13px;color:#cbd5e1;color:rgba(255,255,255,0.75);">${dateNumeric}</td>
               </tr>
               <tr>
                 <td colspan="2" style="padding:16px 0 0;">
-                  <div style="border-top:1px solid rgba(255,255,255,0.28);
+                  <div style="border-top:1px solid #475569;
+                    border-top:1px solid rgba(255,255,255,0.28);
                     font-size:0;line-height:0;">&nbsp;</div>
                 </td>
               </tr>
               <tr>
                 <td colspan="2" align="left" style="padding:10px 0 0;font-size:11px;
-                  letter-spacing:0.5px;color:rgba(255,255,255,0.62);">
+                  letter-spacing:0.5px;color:#94a3b8;color:rgba(255,255,255,0.62);">
                   ${newsList.length} 条趋势 · MORNING PAPER</td>
               </tr>
             </table>
@@ -138,12 +140,8 @@ function buildEmailHtml(
     </td>
   </tr>
 
-  <!-- 说明 -->
-  <tr>
-    <td style="padding:14px 24px 0;color:#94a3b8;font-size:11px;line-height:1.6;">
-      AI 综合全球市场研究机构、行业协会、膜企及权威媒体信息，归纳整理为四段式深度分析
-    </td>
-  </tr>
+  <!-- 刊头与列表之间留白（原说明行与底部重复，已移除） -->
+  <tr><td style="height:24px;font-size:0;line-height:0;">&nbsp;</td></tr>
 
   <!-- 新闻列表 -->
   ${items}
