@@ -28,6 +28,32 @@ interface NewsLocale {
   ceid: string;
 }
 
+// 时间窗：只取窗口内的新闻。
+// 国内原为 48h，实测 6 个关键词合计仅约 6 条候选，低于质检阈值 8 条，
+// 会导致「新闻条数不足」而整天不发送。放宽到 72h 后候选约 19 条，余量充足。
+const DOMESTIC_TIME_WINDOW_HOURS = 72;
+// 国际源供给充足，保持 30 天窗口
+const INTL_TIME_WINDOW_HOURS = 720;
+
+/**
+ * 把标题切成用于判重的词元（去标点、丢弃单字）
+ */
+function titleTokens(title: string): string[] {
+  return title
+    .replace(/[【】\[\]（）()\d+.\s,-:：、，。！？\-\/&|]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
+}
+
+/**
+ * 两组词元重叠 > 60% 视为同一事件
+ */
+function isSameStory(a: string[], b: string[]): boolean {
+  const minLen = Math.min(a.length, b.length);
+  if (minLen === 0) return false;
+  return a.filter((w) => b.includes(w)).length / minLen > 0.6;
+}
+
 /**
  * 清理 HTML 标签和实体，提取纯文本
  */
@@ -176,20 +202,10 @@ async function fetchAndProcessChannel(
   // 去重（关键词重叠 > 60% 视为重复）
   const seenWords: string[][] = [];
   const uniqueNews = allNews.filter((item) => {
-    const words = item.title
-      .replace(/[【】\[\]（）()\d+.\s,-:：、，。！？\-\/&|]/g, ' ')
-      .split(/\s+/)
-      .filter((w) => w.length >= 2);
-    const isDup = seenWords.some((existing) => {
-      const overlap = words.filter((w) => existing.includes(w)).length;
-      const minLen = Math.min(words.length, existing.length);
-      return minLen > 0 && overlap / minLen > 0.6;
-    });
-    if (!isDup) {
-      seenWords.push(words);
-      return true;
-    }
-    return false;
+    const words = titleTokens(item.title);
+    if (seenWords.some((existing) => isSameStory(words, existing))) return false;
+    seenWords.push(words);
+    return true;
   });
 
   // 按时间倒序
@@ -234,40 +250,50 @@ export async function getUnifiedNews(
   totalMax = 10
 ): Promise<NewsItem[]> {
   const [domestic, international] = await Promise.all([
-    fetchAndProcessChannel(domesticKeywords, domesticLocale, domesticMax, '国内', 48, 'zh'),
-    fetchAndProcessChannel(intlKeywords, intlLocale, intlMax, '国际', 720, 'en'),
+    fetchAndProcessChannel(
+      domesticKeywords, domesticLocale, domesticMax, '国内', DOMESTIC_TIME_WINDOW_HOURS, 'zh'
+    ),
+    fetchAndProcessChannel(
+      intlKeywords, intlLocale, intlMax, '国际', INTL_TIME_WINDOW_HOURS, 'en'
+    ),
   ]);
 
-  // 合并去重（关键词重叠 > 60% 视为重复）
-  const all = [...domestic, ...international];
+  // 配额：保证中英版面均衡。
+  // 若合并后直接按时间取前 N，国际源可挑的新条目更多，会把中文挤光（实测 7 英 : 3 中）。
+  const domesticQuota = Math.ceil(totalMax / 2);
+  const intlQuota = totalMax - domesticQuota;
+
   const merged: NewsItem[] = [];
   const seenTitles: string[][] = [];
 
-  for (const item of all) {
-    const words = item.title
-      .replace(/[【】\[\]（）()\d+.\s,-:：、，。！？\-\/&|]/g, ' ')
-      .split(/\s+/)
-      .filter((w) => w.length >= 2);
-
-    // 检查与已有标题的重叠度
-    const isDup = seenTitles.some((existingWords) => {
-      const overlap = words.filter((w) => existingWords.includes(w)).length;
-      const minLen = Math.min(words.length, existingWords.length);
-      return minLen > 0 && overlap / minLen > 0.6;
-    });
-
-    if (!isDup) {
-      seenTitles.push(words);
-      merged.push(item);
-    } else {
+  const take = (item: NewsItem): void => {
+    const words = titleTokens(item.title);
+    if (seenTitles.some((existing) => isSameStory(words, existing))) {
       console.log(`  [去重] 跳过重复: ${item.title.slice(0, 40)}...`);
+      return;
     }
+    seenTitles.push(words);
+    merged.push(item);
+  };
+
+  // 第一轮：两侧各取配额内的条数（各频道内部已按时间倒序）
+  domestic.slice(0, domesticQuota).forEach(take);
+  international.slice(0, intlQuota).forEach(take);
+
+  // 第二轮：某侧候选不足、或去重后掉条时，用两侧剩余新闻按时间补足
+  if (merged.length < totalMax) {
+    [...domestic.slice(domesticQuota), ...international.slice(intlQuota)]
+      .sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime())
+      .forEach((item) => {
+        if (merged.length < totalMax) take(item);
+      });
   }
 
-  // 按时间排序，取前 N
   merged.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
-  const top = merged.slice(0, totalMax);
 
-  console.log(`合并后共 ${top.length} 条新闻 (国内源 ${domestic.length} + 国际源 ${international.length})`);
-  return top;
+  const zhCount = merged.filter((n) => n.lang === 'zh').length;
+  console.log(
+    `合并后共 ${merged.length} 条新闻 (国内源 ${domestic.length} + 国际源 ${international.length}，中文 ${zhCount} / 英文 ${merged.length - zhCount})`
+  );
+  return merged;
 }

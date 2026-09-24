@@ -25,7 +25,9 @@ export const CONFIG = {
       hl: 'zh-CN',
       gl: 'CN',
       ceid: 'CN:zh-Hans',
-      maxCount: Number(process.env.NEWS_DOMESTIC_MAX_COUNT) || 5,
+      // 上限需明显高于质检阈值(8)：两个频道上限之和就是候选总池，
+      // 若卡在 5+5=10，去重掉 2 条就会跌破阈值导致不发送
+      maxCount: Number(process.env.NEWS_DOMESTIC_MAX_COUNT) || 8,
     },
     // 国际新闻（英文关键词）
     international: {
@@ -36,7 +38,7 @@ export const CONFIG = {
       hl: 'en',
       gl: 'US',
       ceid: 'US:en',
-      maxCount: Number(process.env.NEWS_INTL_MAX_COUNT) || 5,
+      maxCount: Number(process.env.NEWS_INTL_MAX_COUNT) || 8,
     },
   },
   // DeepSeek AI 摘要（可选，不配置则无 AI 摘要）
