@@ -32,17 +32,33 @@ interface NewsLocale {
 // 国内原为 48h，实测 6 个关键词合计仅约 6 条候选，低于质检阈值 8 条，
 // 会导致「新闻条数不足」而整天不发送。放宽到 72h 后候选约 19 条，余量充足。
 const DOMESTIC_TIME_WINDOW_HOURS = 72;
-// 国际源供给充足，保持 30 天窗口
-const INTL_TIME_WINDOW_HOURS = 720;
+// 国际源原为 30 天窗口，导致同一条旧闻天天有资格入选、连续重复推送；
+// 收紧到 7 天。跨天重复由已发送状态文件兜底（见 stateService）。
+const INTL_TIME_WINDOW_HOURS = 168;
 
 /**
- * 把标题切成用于判重的词元（去标点、丢弃单字）
+ * 把标题切成用于判重的词元（去标点、丢弃单字）。
+ * 中文没有空格分词，整句会变成一个词元，导致不同来源报道同一事件时
+ * 因标题措辞不同而漏判，所以对中文串取相邻二字组（bigram）作为词元，
+ * 同事件的不同标题共享大部分二字组，相似度阈值才能命中。
  */
-function titleTokens(title: string): string[] {
-  return title
+export function titleTokens(title: string): string[] {
+  const words = title
     .replace(/[【】\[\]（）()\d+.\s,-:：、，。！？\-\/&|]/g, ' ')
     .split(/\s+/)
     .filter((w) => w.length >= 2);
+
+  const tokens = new Set<string>();
+  for (const word of words) {
+    if (/[一-鿿]/.test(word) && word.length > 2) {
+      for (let i = 0; i < word.length - 1; i++) {
+        tokens.add(word.slice(i, i + 2));
+      }
+    } else {
+      tokens.add(word);
+    }
+  }
+  return [...tokens];
 }
 
 /**
@@ -169,7 +185,7 @@ async function fetchGoogleNews(
 }
 
 /**
- * 共享处理管道：抓取 → 去重 → 排序 → 时间过滤 → 切片 → 补图 → 解析真实链接
+ * 共享处理管道：抓取 → 去重 → 排序 → 时间过滤 → 过滤已发送 → 切片 → 补图 → 解析真实链接
  */
 async function fetchAndProcessChannel(
   keywords: readonly string[],
@@ -177,7 +193,8 @@ async function fetchAndProcessChannel(
   maxCount: number,
   channelLabel: string,
   timeWindowHours = 48,
-  lang: 'zh' | 'en' = 'zh'
+  lang: 'zh' | 'en' = 'zh',
+  sentTokens: string[][] = []
 ): Promise<NewsItem[]> {
   const allNews: NewsItem[] = [];
   const now = new Date();
@@ -220,6 +237,19 @@ async function fetchAndProcessChannel(
     recentNews = uniqueNews;
   }
 
+  // 跨天判重：过滤掉最近几天已经推送过的新闻（词元相似 > 60% 视为已发送）
+  if (sentTokens.length > 0) {
+    const beforeFilter = recentNews.length;
+    recentNews = recentNews.filter((item) => {
+      const words = titleTokens(item.title);
+      return !sentTokens.some((existing) => isSameStory(words, existing));
+    });
+    const filteredCount = beforeFilter - recentNews.length;
+    if (filteredCount > 0) {
+      console.log(`[${channelLabel}] 过滤掉最近已发送的旧新闻 ${filteredCount} 条`);
+    }
+  }
+
   // 取前 N 条
   const topNews = recentNews.slice(0, maxCount);
   console.log(`[${channelLabel}] 抓取到 ${topNews.length} 条新闻`);
@@ -239,6 +269,7 @@ async function fetchAndProcessChannel(
 
 /**
  * 获取合并后的统一新闻列表（国内 + 国际去重归并）
+ * @param sentTokens 最近已发送新闻的标题词元，用于跨天判重；首次运行传空数组
  */
 export async function getUnifiedNews(
   domesticKeywords: readonly string[],
@@ -247,14 +278,15 @@ export async function getUnifiedNews(
   intlLocale: NewsLocale,
   domesticMax: number,
   intlMax: number,
-  totalMax = 10
+  totalMax = 10,
+  sentTokens: string[][] = []
 ): Promise<NewsItem[]> {
   const [domestic, international] = await Promise.all([
     fetchAndProcessChannel(
-      domesticKeywords, domesticLocale, domesticMax, '国内', DOMESTIC_TIME_WINDOW_HOURS, 'zh'
+      domesticKeywords, domesticLocale, domesticMax, '国内', DOMESTIC_TIME_WINDOW_HOURS, 'zh', sentTokens
     ),
     fetchAndProcessChannel(
-      intlKeywords, intlLocale, intlMax, '国际', INTL_TIME_WINDOW_HOURS, 'en'
+      intlKeywords, intlLocale, intlMax, '国际', INTL_TIME_WINDOW_HOURS, 'en', sentTokens
     ),
   ]);
 
