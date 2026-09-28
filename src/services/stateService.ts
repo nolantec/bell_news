@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { titleTokens } from './newsService';
 import type { NewsItem } from './newsService';
+import type { AiBriefing } from './aiService';
 
 /**
  * 已发送新闻的持久化记录。
@@ -18,8 +19,23 @@ interface SentEntry {
 }
 
 const STATE_FILE = path.join(process.cwd(), 'data', 'sent-news.json');
+const LAST_MAIL_FILE = path.join(process.cwd(), 'data', 'last-mail.json');
 // 记录保留天数：需覆盖最长的时间窗（国际源 7 天），再留一倍余量
 const RETAIN_DAYS = 14;
+
+/**
+ * 最后一封成功发送的邮件快照（手动重发的数据源）。
+ * 只存新闻数据和 AI 分析，不存渲染后的 HTML：
+ * 重发时用当前代码重新渲染，数据量小一个数量级，仓库负担可忽略
+ */
+export interface LastMail {
+  /** 原发送时间 ISO 字符串，重发时用于还原刊头日期 */
+  sentAt: string;
+  /** 原邮件主题，重发时原样使用 */
+  subject: string;
+  newsList: NewsItem[];
+  aiBriefing: AiBriefing | null;
+}
 
 /**
  * 北京时间的日历日 YYYY-MM-DD。
@@ -68,4 +84,27 @@ export function saveSentState(existing: SentEntry[], items: NewsItem[]): void {
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
   console.log(`已记录本次发送 ${added.length} 条，状态文件累计保留 ${state.entries.length} 条`);
+}
+
+/**
+ * 发送成功后保存邮件快照，供手动触发时零消耗重发
+ */
+export function saveLastMail(mail: LastMail): void {
+  fs.mkdirSync(path.dirname(LAST_MAIL_FILE), { recursive: true });
+  fs.writeFileSync(LAST_MAIL_FILE, JSON.stringify(mail, null, 2), 'utf-8');
+  console.log(`已保存邮件快照，供手动重发（含 ${mail.newsList.length} 条新闻）`);
+}
+
+/**
+ * 读取最后一封邮件快照；尚未成功发送过时返回 null
+ */
+export function loadLastMail(): LastMail | null {
+  try {
+    const raw = fs.readFileSync(LAST_MAIL_FILE, 'utf-8');
+    const parsed = JSON.parse(raw) as LastMail;
+    if (!parsed.subject || !Array.isArray(parsed.newsList)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }

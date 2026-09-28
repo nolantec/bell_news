@@ -3,6 +3,7 @@ import { CONFIG } from '../config';
 import type { NewsItem } from './newsService';
 import type { AiBriefing, AiNewsAnalysis } from './aiService';
 import { HEAD_BG_IMAGE } from '../assets/headBg';
+import { saveLastMail, loadLastMail } from './stateService';
 
 function escapeHtml(str: string): string {
   return str
@@ -74,10 +75,11 @@ function buildNewsItem(
 
 function buildEmailHtml(
   newsList: NewsItem[],
-  aiBriefing: AiBriefing | null
+  aiBriefing: AiBriefing | null,
+  sentOn: Date = new Date()
 ): string {
-  // 刊头日期用数字格式（2026.09.23），比中文长日期更像报刊刊头
-  const dateNumeric = new Date()
+  // 刊头日期：首次发送用当天；重发时传快照的发送时间，刊头还原原发送日
+  const dateNumeric = sentOn
     .toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
     .replace(/\//g, '.');
 
@@ -173,27 +175,67 @@ function buildEmailHtml(
 </body></html>`;
 }
 
-export async function sendMail(
-  newsList: NewsItem[],
-  aiBriefing: AiBriefing | null
-): Promise<void> {
+function createTransporter() {
   const { smtp, mail } = CONFIG;
   if (!smtp.user || !smtp.pass) throw new Error('SMTP 配置不完整');
   if (mail.to.length === 0) throw new Error('收件人列表为空');
 
-  const transporter = nodemailer.createTransport({
+  return nodemailer.createTransport({
     host: smtp.host, port: smtp.port, secure: smtp.secure,
     auth: { user: smtp.user, pass: smtp.pass },
   });
+}
+
+export async function sendMail(
+  newsList: NewsItem[],
+  aiBriefing: AiBriefing | null
+): Promise<void> {
+  const { mail } = CONFIG;
+  const transporter = createTransporter();
 
   const html = buildEmailHtml(newsList, aiBriefing);
   const today = new Date().toLocaleDateString('zh-CN');
+  const subject = `【汽车膜早报】${today} · ${newsList.length} 条行业趋势`;
 
   const info = await transporter.sendMail({
     from: `"汽车膜早报" <${mail.from}>`,
     to: mail.to.join(', '),
-    subject: `【汽车膜早报】${today} · ${newsList.length} 条行业趋势`,
+    subject,
     html,
   });
   console.log('邮件发送成功:', info.messageId);
+
+  // 发送成功后才落快照：失败时保留上一封，手动重发拿到的始终是完整可发的数据
+  saveLastMail({
+    sentAt: new Date().toISOString(),
+    subject,
+    newsList,
+    aiBriefing,
+  });
+}
+
+/**
+ * 重发上一封成功发送的邮件：不抓取、不耗 AI，可多次触发。
+ * 快照只存数据，HTML 用当前代码重新渲染；刊头日期还原原发送日
+ */
+export async function resendLastMail(): Promise<void> {
+  const { mail } = CONFIG;
+  const snapshot = loadLastMail();
+  if (!snapshot) throw new Error('没有可重发的邮件快照（data/last-mail.json 不存在或为空）');
+
+  const transporter = createTransporter();
+  const sentOn = new Date(snapshot.sentAt);
+  const html = buildEmailHtml(
+    snapshot.newsList,
+    snapshot.aiBriefing,
+    Number.isNaN(sentOn.getTime()) ? undefined : sentOn
+  );
+
+  const info = await transporter.sendMail({
+    from: `"汽车膜早报" <${mail.from}>`,
+    to: mail.to.join(', '),
+    subject: `${snapshot.subject}（重发）`,
+    html,
+  });
+  console.log('邮件重发成功:', info.messageId);
 }

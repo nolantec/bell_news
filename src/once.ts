@@ -1,7 +1,7 @@
 import { CONFIG } from './config';
 import { getUnifiedNews } from './services/newsService';
 import { generateBriefing } from './services/aiService';
-import { sendMail } from './services/mailService';
+import { sendMail, resendLastMail } from './services/mailService';
 import { loadSentState, saveSentState, isAlreadySentToday } from './services/stateService';
 
 async function runOnce(): Promise<void> {
@@ -9,6 +9,12 @@ async function runOnce(): Promise<void> {
   console.log(`[${new Date().toISOString()}] 开始执行早报任务...`);
 
   try {
+    // 手动重发模式：直接重发上一封快照，不抓取、不耗 AI、不受当日防重护栏限制
+    if (process.env.RESEND) {
+      await resendLastMail();
+      process.exit(0);
+    }
+
     const { domestic: dom, international: intl } = CONFIG.news;
     console.log(`国内关键词: ${dom.keywords.join(', ')}`);
     console.log(`国际关键词: ${intl.keywords.join(', ')}`);
