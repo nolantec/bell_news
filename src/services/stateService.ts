@@ -22,6 +22,23 @@ const STATE_FILE = path.join(process.cwd(), 'data', 'sent-news.json');
 const RETAIN_DAYS = 14;
 
 /**
+ * 北京时间的日历日 YYYY-MM-DD。
+ * 运行发生在北京早晨（UTC 前一天深夜），用 UTC 日期会把同一个北京日的
+ * 两次运行记到不同日期，导致防重护栏漏判，所以统一按北京时间计日
+ */
+export function beijingToday(): string {
+  return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * 当日是否已成功发送过（双时段定时/手动触发的防重护栏）
+ */
+export function isAlreadySentToday(entries: SentEntry[]): boolean {
+  const today = beijingToday();
+  return entries.some((e) => e.d === today);
+}
+
+/**
  * 读取已发送记录。文件不存在（首次运行）或损坏时返回空列表，不阻断流程
  */
 export function loadSentState(): SentEntry[] {
@@ -43,7 +60,7 @@ export function saveSentState(existing: SentEntry[], items: NewsItem[]): void {
   const cutoff = new Date(now.getTime() - RETAIN_DAYS * 24 * 60 * 60 * 1000);
   const kept = existing.filter((e) => new Date(e.d) >= cutoff);
   const added: SentEntry[] = items.map((item) => ({
-    d: now.toISOString().slice(0, 10),
+    d: beijingToday(),
     w: titleTokens(item.title),
   }));
 

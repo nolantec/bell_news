@@ -28,13 +28,36 @@ interface NewsLocale {
   ceid: string;
 }
 
-// 时间窗：只取窗口内的新闻。
-// 国内原为 48h，实测 6 个关键词合计仅约 6 条候选，低于质检阈值 8 条，
-// 会导致「新闻条数不足」而整天不发送。放宽到 72h 后候选约 19 条，余量充足。
-const DOMESTIC_TIME_WINDOW_HOURS = 72;
-// 国际源原为 30 天窗口，导致同一条旧闻天天有资格入选、连续重复推送；
-// 收紧到 7 天。跨天重复由已发送状态文件兜底（见 stateService）。
+// 时间窗：只取窗口内的新闻。窗口深度需与跨天判重联动：
+// 判重会把已发送条目从候选中剔除，窗口太浅时次日新鲜候选不足，
+// 会触发「新闻条数不足」整天不发送。国内 72h 实测次日新鲜仅 3 条，
+// 放宽到与国际源一致的 7 天，保留足够的未发送存量供滚动选用。
+const DOMESTIC_TIME_WINDOW_HOURS = 168;
 const INTL_TIME_WINDOW_HOURS = 168;
+
+// 合并后新鲜新闻低于此数时启用旧闻补位（与 qaService 的 8 条门槛一致）
+const BACKFILL_MIN_COUNT = 8;
+
+/** 已发送记录：标题词元 + 最近发送日期，用于跨天判重与补位冷却计算 */
+export interface SentRecord {
+  tokens: string[];
+  lastSent: Date;
+}
+
+/** 频道处理结果：新鲜新闻 + 已发送过但可作补位的旧闻 */
+interface ChannelResult {
+  fresh: NewsItem[];
+  repeats: { item: NewsItem; lastSent: Date }[];
+}
+
+/**
+ * 两个日期间隔的自然日天数（按 UTC 日历日计算，避免时刻与时区干扰）
+ */
+function calendarDaysBetween(earlier: Date, later: Date): number {
+  const a = Date.UTC(earlier.getUTCFullYear(), earlier.getUTCMonth(), earlier.getUTCDate());
+  const b = Date.UTC(later.getUTCFullYear(), later.getUTCMonth(), later.getUTCDate());
+  return Math.round((b - a) / 86400000);
+}
 
 /**
  * 把标题切成用于判重的词元（去标点、丢弃单字）。
@@ -185,7 +208,8 @@ async function fetchGoogleNews(
 }
 
 /**
- * 共享处理管道：抓取 → 去重 → 排序 → 时间过滤 → 过滤已发送 → 切片 → 补图 → 解析真实链接
+ * 共享处理管道：抓取 → 去重 → 排序 → 时间过滤 → 跨天判重分流 → 切片 → 补图 → 解析真实链接
+ * 已发送过的条目不直接丢弃，进入补位池，供合并阶段新鲜不足时按冷却天数回填
  */
 async function fetchAndProcessChannel(
   keywords: readonly string[],
@@ -194,8 +218,8 @@ async function fetchAndProcessChannel(
   channelLabel: string,
   timeWindowHours = 48,
   lang: 'zh' | 'en' = 'zh',
-  sentTokens: string[][] = []
-): Promise<NewsItem[]> {
+  sentRecords: SentRecord[] = []
+): Promise<ChannelResult> {
   const allNews: NewsItem[] = [];
   const now = new Date();
   const timeWindowAgo = new Date(now.getTime() - timeWindowHours * 60 * 60 * 1000);
@@ -237,25 +261,34 @@ async function fetchAndProcessChannel(
     recentNews = uniqueNews;
   }
 
-  // 跨天判重：过滤掉最近几天已经推送过的新闻（词元相似 > 60% 视为已发送）
-  if (sentTokens.length > 0) {
-    const beforeFilter = recentNews.length;
-    recentNews = recentNews.filter((item) => {
-      const words = titleTokens(item.title);
-      return !sentTokens.some((existing) => isSameStory(words, existing));
-    });
-    const filteredCount = beforeFilter - recentNews.length;
-    if (filteredCount > 0) {
-      console.log(`[${channelLabel}] 过滤掉最近已发送的旧新闻 ${filteredCount} 条`);
+  // 跨天判重：命中已发送记录的进入补位池（冷却按最近一次发送算），其余为新鲜新闻
+  const fresh: NewsItem[] = [];
+  const repeats: { item: NewsItem; lastSent: Date }[] = [];
+  for (const item of recentNews) {
+    const words = titleTokens(item.title);
+    let lastSent: Date | null = null;
+    for (const record of sentRecords) {
+      if (isSameStory(words, record.tokens) && (!lastSent || record.lastSent > lastSent)) {
+        lastSent = record.lastSent;
+      }
+    }
+    if (lastSent) {
+      repeats.push({ item, lastSent });
+    } else {
+      fresh.push(item);
     }
   }
+  if (repeats.length > 0) {
+    console.log(`[${channelLabel}] 已发送过 ${repeats.length} 条，转入补位池`);
+  }
 
-  // 取前 N 条
-  const topNews = recentNews.slice(0, maxCount);
-  console.log(`[${channelLabel}] 抓取到 ${topNews.length} 条新闻`);
+  // 各取前 N 条（频道内部已按时间倒序）
+  const topFresh = fresh.slice(0, maxCount);
+  const topRepeats = repeats.slice(0, maxCount);
+  console.log(`[${channelLabel}] 新鲜 ${topFresh.length} 条，可补位旧闻 ${topRepeats.length} 条`);
 
   // 链接策略：中文百度、英文 Bing
-  for (const item of topNews) {
+  for (const item of [...topFresh, ...topRepeats.map((r) => r.item)]) {
     item.lang = lang;
     if (lang === 'zh') {
       item.link = `https://www.baidu.com/s?wd=${encodeURIComponent(item.title)}`;
@@ -264,12 +297,12 @@ async function fetchAndProcessChannel(
     }
   }
 
-  return topNews;
+  return { fresh: topFresh, repeats: topRepeats };
 }
 
 /**
- * 获取合并后的统一新闻列表（国内 + 国际去重归并）
- * @param sentTokens 最近已发送新闻的标题词元，用于跨天判重；首次运行传空数组
+ * 获取合并后的统一新闻列表（国内 + 国际去重归并，新鲜不足时旧闻补位）
+ * @param sentRecords 最近已发送新闻记录，用于跨天判重与补位冷却；首次运行传空数组
  */
 export async function getUnifiedNews(
   domesticKeywords: readonly string[],
@@ -279,16 +312,18 @@ export async function getUnifiedNews(
   domesticMax: number,
   intlMax: number,
   totalMax = 10,
-  sentTokens: string[][] = []
+  sentRecords: SentRecord[] = []
 ): Promise<NewsItem[]> {
-  const [domestic, international] = await Promise.all([
+  const [domChannel, intlChannel] = await Promise.all([
     fetchAndProcessChannel(
-      domesticKeywords, domesticLocale, domesticMax, '国内', DOMESTIC_TIME_WINDOW_HOURS, 'zh', sentTokens
+      domesticKeywords, domesticLocale, domesticMax, '国内', DOMESTIC_TIME_WINDOW_HOURS, 'zh', sentRecords
     ),
     fetchAndProcessChannel(
-      intlKeywords, intlLocale, intlMax, '国际', INTL_TIME_WINDOW_HOURS, 'en', sentTokens
+      intlKeywords, intlLocale, intlMax, '国际', INTL_TIME_WINDOW_HOURS, 'en', sentRecords
     ),
   ]);
+  const domestic = domChannel.fresh;
+  const international = intlChannel.fresh;
 
   // 配额：保证中英版面均衡。
   // 若合并后直接按时间取前 N，国际源可挑的新条目更多，会把中文挤光（实测 7 英 : 3 中）。
@@ -319,6 +354,32 @@ export async function getUnifiedNews(
       .forEach((item) => {
         if (merged.length < totalMax) take(item);
       });
+  }
+
+  // 第三轮：新鲜条目低于质检门槛时，用补位池旧闻回填，宁补旧闻不开天窗。
+  // 冷却优先 3 天起逐档放宽到 1 天（当天发送过的绝不回来）；档内「最久没发」的优先
+  if (merged.length < BACKFILL_MIN_COUNT) {
+    const pool = [...domChannel.repeats, ...intlChannel.repeats]
+      .map((r) => ({ ...r, ageDays: calendarDaysBetween(r.lastSent, new Date()) }))
+      .filter((r) => r.ageDays >= 1)
+      .sort((a, b) => b.ageDays - a.ageDays || b.item.pubDate.getTime() - a.item.pubDate.getTime());
+
+    for (const minAge of [3, 2, 1]) {
+      const eligible = pool.filter((p) => p.ageDays >= minAge);
+      // 该档足以补满，或已是最后一档（尽力而为）时使用
+      if (merged.length + eligible.length >= BACKFILL_MIN_COUNT || minAge === 1) {
+        let used = 0;
+        for (const p of eligible) {
+          if (merged.length >= BACKFILL_MIN_COUNT) break;
+          take(p.item);
+          used++;
+        }
+        if (used > 0) {
+          console.log(`补位：新鲜新闻不足，回填 ${used} 条冷却 ≥${minAge} 天的旧闻`);
+        }
+        break;
+      }
+    }
   }
 
   merged.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());

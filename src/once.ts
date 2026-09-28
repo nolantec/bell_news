@@ -2,7 +2,7 @@ import { CONFIG } from './config';
 import { getUnifiedNews } from './services/newsService';
 import { generateBriefing } from './services/aiService';
 import { sendMail } from './services/mailService';
-import { loadSentState, saveSentState } from './services/stateService';
+import { loadSentState, saveSentState, isAlreadySentToday } from './services/stateService';
 
 async function runOnce(): Promise<void> {
   const startTime = Date.now();
@@ -17,6 +17,15 @@ async function runOnce(): Promise<void> {
     const sentEntries = loadSentState();
     console.log(`已发送记录: ${sentEntries.length} 条`);
 
+    // 当日防重护栏：双时段定时或手动触发时，当天已成功发送过就不再发
+    // （FORCE_RUN=1 可强制重跑，用于本地调试）
+    if (!process.env.FORCE_RUN && isAlreadySentToday(sentEntries)) {
+      console.log('今日已发送过早报，跳过');
+      process.exit(0);
+    }
+
+    const sentRecords = sentEntries.map((e) => ({ tokens: e.w, lastSent: new Date(e.d) }));
+
     const newsList = await getUnifiedNews(
       dom.keywords,
       intl.keywords,
@@ -25,7 +34,7 @@ async function runOnce(): Promise<void> {
       dom.maxCount,
       intl.maxCount,
       10,
-      sentEntries.map((e) => e.w)
+      sentRecords
     );
 
     console.log(`抓取完成: ${newsList.length} 条新闻`);
