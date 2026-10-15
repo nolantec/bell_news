@@ -47,9 +47,9 @@ ${newsData}
 
 ## 写作参考
 "• 核心观点：全球汽车贴膜市场正经历结构性增长，中国以 42% 区域份额持续领跑，TPU 隐形车衣向中端车型加速渗透成为核心驱动力。
-• 数据支撑：据 Grand View Research 最新报告，2026 年全球汽车贴膜市场规模预计达 139 亿美元，2033 年将增至 263 亿美元，年复合增长率 9.6%。装贴率从 2023 年不足 5% 提升至 2026 年 15% 以上。
-• 行业影响：电动汽车全景天幕普及催生高效隔热膜结构性需求，TPU 粒子供应波动和低价劣质膜扰乱市场秩序成为行业主要挑战。头部膜企加速自建生产线和正品溯源体系应对。
-• 趋势展望：技术领先的头部膜企和具备规模化成本优势的国产品牌将在下一轮竞争中占据有利位置。欧美多地对车窗透光率法规趋严将倒逼高透光高隔热纳米膜研发加速。"
+• 数据支撑：据 Grand View Research 最新报告，2026 年全球汽车贴膜市场规模预计达 139 亿美元，2033 年将增至 263 亿美元，年复合增长率 9.6%。装贴率从 2[...]
+• 行业影响：电动汽车全景天幕普及催生高效隔热膜结构性需求，TPU 粒子供应波动和低价劣质膜扰乱市场秩序成为行业主要挑战。头部膜企加速自��[...]
+• 趋势展望：技术领先的头部膜企和具备规模化成本优势的国产品牌将在下一轮竞争中占据有利位置。欧美多地对车窗透光率法规趋严将倒逼高透光[...]
 
 严格输出 JSON，无其他内容。共 ${newsList.length} 条，index 0-${newsList.length - 1}：
 {
@@ -57,6 +57,55 @@ ${newsData}
     { "index": 0, "headline": "…", "summary": "约400字的深度分析…" }
   ]
 }`;
+}
+
+function previewText(text: string | undefined, n = 1000) {
+  if (!text) return '<empty>';
+  return text.length > n ? text.slice(0, n) + '...<truncated>' : text;
+}
+
+async function fetchWithRetries(url: string, options: any, attempts = 3) {
+  const baseDelay = 1000;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    let controller: AbortController | null = null;
+    try {
+      controller = new AbortController();
+      const timeout = setTimeout(() => controller!.abort(), 120000);
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeout as any);
+
+      const status = res.status;
+      const text = await res.text();
+      console.log(`[AI] attempt=${attempt} status=${status} bodyPreview=${previewText(text, 1000)}`);
+
+      if (!res.ok) {
+        // For transient server errors or rate limit, retry
+        if ((status === 429 || status >= 500) && attempt < attempts) {
+          const delay = baseDelay * Math.pow(2, attempt - 1);
+          console.warn(`[AI] transient http ${status}, retrying after ${delay}ms`);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+        throw new Error(`HTTP ${status} ${previewText(text, 500)}`);
+      }
+
+      if (!text || text.trim().length === 0) {
+        throw new Error(`empty body (status ${status})`);
+      }
+
+      return text;
+    } catch (err: any) {
+      const isAbort = err && err.name === 'AbortError';
+      console.error(`[AI] request error attempt=${attempt} abort=${isAbort} message=${err?.message}`);
+      if (attempt < attempts) {
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 export async function generateBriefing(newsList: NewsItem[], isRetry = false): Promise<AiBriefing | null> {
@@ -68,71 +117,75 @@ export async function generateBriefing(newsList: NewsItem[], isRetry = false): P
 
   const prompt = buildPrompt(newsList);
 
-  // 重试 3 次，应对网络抖动
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120000);
-
-      const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${CONFIG.ai.apiKey}`,
+  try {
+    const payload = {
+      model: 'deepseek-chat',
+      messages: [
+        {
+          role: 'system',
+          content: isRetry
+            ? '你是汽车膜行业首席分析师。⚠️ 严格要求：每条 summary 四段式每段至少80字，总350-450字。上次输出字数不足，这次务必写够字数，且只输出 JSON。'
+            : '你是汽车膜行业首席分析师。每条 summary 四段式每段至少80字，总350-450字。信息密度高，读完掌握全局。只输出 JSON。',
         },
-        body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages: [
-            {
-              role: 'system',
-              content:
-                isRetry
-                ? '你是汽车膜行业首席分析师。⚠️ 严格要求：每条 summary 四段式每段至少80字，总350-450字。上次输出字数不足，这次务必写够字数，每段都要充分展开论述，达到字数要求再结束。只输出 JSON。'
-                : '你是汽车膜行业首席分析师。每条 summary 四段式每段至少80字，总350-450字。信息密度高，读完掌握全局。只输出 JSON。',
-            },
-            { role: 'user', content: prompt },
-          ],
-          temperature: isRetry ? 0.5 : 0.7,
-          max_tokens: 30000,
-          frequency_penalty: 0.2,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+        { role: 'user', content: prompt },
+      ],
+      temperature: isRetry ? 0.5 : 0.7,
+      max_tokens: 30000,
+      frequency_penalty: 0.2,
+    };
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+    const responseText = await fetchWithRetries('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${CONFIG.ai.apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    }, 3);
+
+    // Try parse response as JSON similar to previous behavior
+    let parsed: any;
+    try {
+      // The provider is expected to return a JSON object like { choices: [{ message: { content } }] }
+      parsed = JSON.parse(responseText);
+    } catch (e) {
+      // If provider wrapped JSON in markdown code fences, try to extract
+      let t = responseText.trim();
+      if (t.startsWith('```')) {
+        t = t.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
       }
-
-      const data = (await response.json()) as { choices: { message: { content: string } }[] };
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) throw new Error('空响应');
-
-      let jsonStr = content.trim();
-      if (jsonStr.startsWith('```')) {
-        jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
-      }
-
-      const briefing = JSON.parse(jsonStr) as AiBriefing;
-      if (!Array.isArray(briefing.analyses) || briefing.analyses.length === 0) {
-        throw new Error('格式不正确');
-      }
-
-      const avgLen = Math.round(
-        briefing.analyses.reduce((s, a) => s + a.summary.length, 0) / briefing.analyses.length
-      );
-      console.log(`AI 分析完成: ${briefing.analyses.length} 条, 平均 ${avgLen} 字/条`);
-      return briefing;
-    } catch (err) {
-      if (attempt < 3) {
-        console.log(`AI 请求失败 (第${attempt}次), 1秒后重试...`);
-        await new Promise((r) => setTimeout(r, 1000));
-      } else {
-        console.error('AI 分析失败(已重试3次):', err);
-        return null;
+      try {
+        parsed = JSON.parse(t);
+      } catch (e2) {
+        throw new Error(`无法解析 AI 返回内容为 JSON，responsePreview=${previewText(responseText, 1000)}`);
       }
     }
-  }
 
-  return null;
+    const content = parsed?.choices?.[0]?.message?.content;
+    if (!content) {
+      // If structure differs, try to stringify whole parsed for debugging
+      console.error('[AI] response parsed but missing choices[0].message.content, parsedPreview=', previewText(JSON.stringify(parsed), 2000));
+      throw new Error('空响应或返回结构不符合预期');
+    }
+
+    let jsonStr = content.trim();
+    if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+    }
+
+    const briefing = JSON.parse(jsonStr) as AiBriefing;
+    if (!Array.isArray(briefing.analyses) || briefing.analyses.length === 0) {
+      throw new Error(`格式不正确，analyses 为空或不是数组，preview=${previewText(jsonStr, 1000)}`);
+    }
+
+    const avgLen = Math.round(
+      briefing.analyses.reduce((s, a) => s + (a.summary?.length || 0), 0) / briefing.analyses.length
+    );
+    console.log(`AI 分析完成: ${briefing.analyses.length} 条, 平均 ${avgLen} 字/条`);
+    return briefing;
+  } catch (err: any) {
+    console.error('AI 分析失败(已重试3次):', err?.message || err);
+    // Return null to keep existing behavior (上层会进行质检判断)
+    return null;
+  }
 }
