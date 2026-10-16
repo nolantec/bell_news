@@ -106,6 +106,9 @@ async function fetchWithRetries(url: string, options: any, attempts = 3): Promis
       throw err;
     }
   }
+
+  // 兜底：满足编译器的穷尽性检查（正常情况下每次尝试要么返回要么抛错）
+  throw new Error(`[AI] 连续 ${attempts} 次请求均未成功`);
 }
 
 export async function generateBriefing(newsList: NewsItem[], isRetry = false): Promise<AiBriefing | null> {
@@ -124,7 +127,7 @@ export async function generateBriefing(newsList: NewsItem[], isRetry = false): P
         {
           role: 'system',
           content: isRetry
-            ? '你是汽车膜行业首席分析师。⚠️ 严格要求：每条 summary 四段式每段至少80字，总350-450字。上次输出字数不足，这次务必写够字数，且��[...]
+            ? '你是汽车膜行业首席分析师。⚠️ 严格要求：每条 summary 四段式每段至少80字，总350-450字。上次输出字数不足，这次务必写够字数，且只输出 JSON。'
             : '你是汽车膜行业首席分析师。每条 summary 四段式每段至少80字，总350-450字。信息密度高，读完掌握全局。只输出 JSON.',
         },
         { role: 'user', content: prompt },
