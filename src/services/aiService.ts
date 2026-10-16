@@ -64,7 +64,7 @@ function previewText(text: string | undefined, n = 1000) {
   return text.length > n ? text.slice(0, n) + '...<truncated>' : text;
 }
 
-async function fetchWithRetries(url: string, options: any, attempts = 3) {
+async function fetchWithRetries(url: string, options: any, attempts = 3): Promise<string> {
   const baseDelay = 1000;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -124,8 +124,8 @@ export async function generateBriefing(newsList: NewsItem[], isRetry = false): P
         {
           role: 'system',
           content: isRetry
-            ? '你是汽车膜行业首席分析师。⚠️ 严格要求：每条 summary 四段式每段至少80字，总350-450字。上次输出字数不足，这次务必写够字数，且只输出 JSON。'
-            : '你是汽车膜行业首席分析师。每条 summary 四段式每段至少80字，总350-450字。信息密度高，读完掌握全局。只输出 JSON。',
+            ? '你是汽车膜行业首席分析师。⚠️ 严格要求：每条 summary 四段式每段至少80字，总350-450字。上次输出字数不足，这次务必写够字数，且��[...]
+            : '你是汽车膜行业首席分析师。每条 summary 四段式每段至少80字，总350-450字。信息密度高，读完掌握全局。只输出 JSON.',
         },
         { role: 'user', content: prompt },
       ],
@@ -142,6 +142,10 @@ export async function generateBriefing(newsList: NewsItem[], isRetry = false): P
       },
       body: JSON.stringify(payload),
     }, 3);
+
+    if (!responseText) {
+      throw new Error('DeepSeek 返回空响应');
+    }
 
     // Try parse response as JSON similar to previous behavior
     let parsed: any;
