@@ -200,6 +200,7 @@ export async function sendMail(
   const info = await transporter.sendMail({
     from: `"汽车膜早报" <${mail.from}>`,
     to: mail.to.join(', '),
+    bcc: mail.bcc.length > 0 ? mail.bcc.join(', ') : undefined,
     subject,
     html,
   });
@@ -234,6 +235,7 @@ export async function resendLastMail(): Promise<void> {
   const info = await transporter.sendMail({
     from: `"汽车膜早报" <${mail.from}>`,
     to: mail.to.join(', '),
+    bcc: mail.bcc.length > 0 ? mail.bcc.join(', ') : undefined,
     subject: `${snapshot.subject}（重发）`,
     html,
   });

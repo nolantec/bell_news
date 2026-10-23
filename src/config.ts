@@ -13,6 +13,8 @@ export const CONFIG = {
   mail: {
     from: process.env.SMTP_USER || '',
     to: (process.env.MAIL_TO || '').split(',').map((e) => e.trim()).filter(Boolean),
+    // 密送名单（可选）：MAIL_BCC 为空则不发送 bcc
+    bcc: (process.env.MAIL_BCC || '').split(',').map((e) => e.trim()).filter(Boolean),
   },
   schedule: process.env.SCHEDULE || '0 0 7 * * *',
   news: {
